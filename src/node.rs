@@ -18,6 +18,7 @@ pub(crate) trait AnyComponent: Send + Sync {
         tracked_state: &mut dyn Any,
     ) -> crate::component::EventResult;
     fn cursor_position_erased(&self, area: Rect, state: &dyn Any) -> Option<(u16, u16)>;
+    fn is_focusable_erased(&self, state: &dyn Any) -> bool;
 }
 
 impl<C: Component> AnyComponent for C {
@@ -52,6 +53,13 @@ impl<C: Component> AnyComponent for C {
             .downcast_ref::<C::State>()
             .expect("state type mismatch in cursor_position_erased");
         self.cursor_position(area, state)
+    }
+
+    fn is_focusable_erased(&self, state: &dyn Any) -> bool {
+        let state = state
+            .downcast_ref::<C::State>()
+            .expect("state type mismatch in is_focusable_erased");
+        self.is_focusable(state)
     }
 }
 

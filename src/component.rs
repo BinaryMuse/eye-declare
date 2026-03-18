@@ -83,6 +83,14 @@ pub trait Component: Send + Sync + 'static {
         EventResult::Ignored
     }
 
+    /// Whether this component can receive focus.
+    ///
+    /// The framework uses this for Tab cycling — only focusable
+    /// components are included in the tab order (depth-first tree order).
+    fn is_focusable(&self, _state: &Self::State) -> bool {
+        false
+    }
+
     /// Where to position the terminal's hardware cursor when this
     /// component has focus. Returns `(col, row)` relative to the
     /// component's render area, or `None` to hide the cursor.

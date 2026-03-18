@@ -96,13 +96,32 @@ impl Renderer {
 
     /// Deliver an event to the focused component.
     ///
-    /// If the focused component returns [`EventResult::Ignored`],
-    /// the event bubbles up to its parent, and so on until consumed
-    /// or the root is reached.
+    /// Tab and Shift-Tab are intercepted for focus cycling among
+    /// focusable components (depth-first tree order). All other events
+    /// are delivered to the focused component with bubble-up to parents.
     ///
     /// Returns [`EventResult::Ignored`] if no component is focused
     /// or no component consumed the event.
     pub fn handle_event(&mut self, event: &crossterm::event::Event) -> EventResult {
+        // Intercept Tab / Shift-Tab for focus cycling
+        use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+        if let Event::Key(KeyEvent {
+            code,
+            kind: KeyEventKind::Press,
+            modifiers,
+            ..
+        }) = event
+        {
+            let is_tab = *code == KeyCode::Tab && !modifiers.contains(KeyModifiers::SHIFT);
+            let is_backtab = *code == KeyCode::BackTab
+                || (*code == KeyCode::Tab && modifiers.contains(KeyModifiers::SHIFT));
+
+            if is_tab || is_backtab {
+                self.cycle_focus(is_backtab);
+                return EventResult::Consumed;
+            }
+        }
+
         let Some(focused) = self.focused else {
             return EventResult::Ignored;
         };
@@ -112,7 +131,6 @@ impl Renderer {
         while let Some(id) = current {
             let node = &mut self.nodes[id.0];
             if node.frozen {
-                // Frozen components don't handle events
                 current = node.parent;
                 continue;
             }
@@ -125,6 +143,52 @@ impl Renderer {
         }
 
         EventResult::Ignored
+    }
+
+    /// Collect focusable node IDs in depth-first tree order.
+    fn focusable_nodes(&self) -> Vec<NodeId> {
+        let mut result = Vec::new();
+        self.collect_focusable(self.root, &mut result);
+        result
+    }
+
+    fn collect_focusable(&self, id: NodeId, result: &mut Vec<NodeId>) {
+        let node = &self.nodes[id.0];
+        if node.frozen {
+            return;
+        }
+        let state = node.state.inner_as_any();
+        if node.component.is_focusable_erased(state) {
+            result.push(id);
+        }
+        for &child in &node.children {
+            self.collect_focusable(child, result);
+        }
+    }
+
+    /// Cycle focus to the next (or previous) focusable component.
+    fn cycle_focus(&mut self, reverse: bool) {
+        let focusable = self.focusable_nodes();
+        if focusable.is_empty() {
+            return;
+        }
+
+        let current_idx = self
+            .focused
+            .and_then(|f| focusable.iter().position(|&id| id == f));
+
+        let next_idx = match current_idx {
+            Some(idx) => {
+                if reverse {
+                    if idx == 0 { focusable.len() - 1 } else { idx - 1 }
+                } else {
+                    (idx + 1) % focusable.len()
+                }
+            }
+            None => 0, // No current focus → focus first focusable
+        };
+
+        self.focused = Some(focusable[next_idx]);
     }
 
     /// Remove a node and all its descendants from the tree.
@@ -722,5 +786,116 @@ mod tests {
         r.handle_event(&key_event('b'));
         assert_eq!(&**r.state_mut::<InputCapture>(id1), "a");
         assert_eq!(&**r.state_mut::<InputCapture>(id2), "b");
+    }
+
+    // --- Focus cycling tests ---
+
+    /// A focusable component for tab cycling tests.
+    struct FocusableItem;
+
+    impl Component for FocusableItem {
+        type State = String;
+
+        fn render(&self, area: Rect, buf: &mut Buffer, state: &Self::State) {
+            let line = ratatui_core::text::Line::raw(state.as_str());
+            ratatui_core::widgets::Widget::render(Paragraph::new(line), area, buf);
+        }
+
+        fn desired_height(&self, _width: u16, state: &Self::State) -> u16 {
+            if state.is_empty() { 0 } else { 1 }
+        }
+
+        fn is_focusable(&self, _state: &Self::State) -> bool {
+            true
+        }
+
+        fn initial_state(&self) -> String {
+            "item".to_string()
+        }
+    }
+
+    fn tab_event() -> crossterm::event::Event {
+        crossterm::event::Event::Key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Tab,
+            crossterm::event::KeyModifiers::empty(),
+        ))
+    }
+
+    fn backtab_event() -> crossterm::event::Event {
+        crossterm::event::Event::Key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::BackTab,
+            crossterm::event::KeyModifiers::SHIFT,
+        ))
+    }
+
+    #[test]
+    fn tab_cycles_through_focusable_nodes() {
+        let mut r = Renderer::new(10);
+        let _non_focusable = r.push(TextBlock); // not focusable
+        let f1 = r.push(FocusableItem);
+        let f2 = r.push(FocusableItem);
+        let f3 = r.push(FocusableItem);
+
+        r.state_mut::<TextBlock>(_non_focusable).push("header".to_string());
+
+        // No initial focus → Tab focuses first focusable
+        r.handle_event(&tab_event());
+        assert_eq!(r.focus(), Some(f1));
+
+        // Tab again → second
+        r.handle_event(&tab_event());
+        assert_eq!(r.focus(), Some(f2));
+
+        // Tab again → third
+        r.handle_event(&tab_event());
+        assert_eq!(r.focus(), Some(f3));
+
+        // Tab wraps → back to first
+        r.handle_event(&tab_event());
+        assert_eq!(r.focus(), Some(f1));
+    }
+
+    #[test]
+    fn backtab_cycles_reverse() {
+        let mut r = Renderer::new(10);
+        let f1 = r.push(FocusableItem);
+        let f2 = r.push(FocusableItem);
+        let f3 = r.push(FocusableItem);
+
+        r.set_focus(f1);
+
+        // BackTab from first → wraps to last
+        r.handle_event(&backtab_event());
+        assert_eq!(r.focus(), Some(f3));
+
+        // BackTab → second
+        r.handle_event(&backtab_event());
+        assert_eq!(r.focus(), Some(f2));
+    }
+
+    #[test]
+    fn tab_skips_frozen_nodes() {
+        let mut r = Renderer::new(10);
+        let f1 = r.push(FocusableItem);
+        let f2 = r.push(FocusableItem);
+        let f3 = r.push(FocusableItem);
+
+        let _ = r.render(); // populate caches
+        r.freeze(f2); // freeze the middle one
+
+        r.set_focus(f1);
+        r.handle_event(&tab_event());
+        // Should skip f2 (frozen) → go to f3
+        assert_eq!(r.focus(), Some(f3));
+    }
+
+    #[test]
+    fn tab_with_no_focusable_nodes_does_nothing() {
+        let mut r = Renderer::new(10);
+        let _id = r.push(TextBlock); // not focusable
+        r.state_mut::<TextBlock>(_id).push("text".to_string());
+
+        r.handle_event(&tab_event());
+        assert_eq!(r.focus(), None);
     }
 }
