@@ -3,33 +3,51 @@ use ratatui_core::{
     layout::Rect,
 };
 
-use crate::component::{Component, Tracked};
+use crate::component::{Component, Tracked, VStack};
 use crate::frame::Frame;
 use crate::node::{Node, NodeId};
 
-/// Manages a flat list of components and renders them into a Frame.
+/// Manages a tree of components and renders them into a Frame.
 ///
-/// Phase 1 uses a simple vertical stack layout. Components are rendered
-/// top-to-bottom, each getting its desired height at the current width.
+/// The tree has an implicit root node (a VStack) created automatically.
+/// Components are added as children of the root or of other nodes.
+/// Children are laid out vertically within their parent's area.
 pub struct Renderer {
     nodes: Vec<Node>,
+    root: NodeId,
     width: u16,
 }
 
 impl Renderer {
     /// Create a new renderer with the given terminal width.
+    /// An implicit VStack root node is created automatically.
     pub fn new(width: u16) -> Self {
-        Self {
-            nodes: Vec::new(),
-            width,
-        }
+        let mut nodes = Vec::new();
+        let root = NodeId(0);
+        nodes.push(Node::new(VStack));
+        // Root starts clean since VStack has no visible content
+        nodes[0].state.clear_dirty();
+        Self { nodes, root, width }
     }
 
-    /// Add a component to the bottom of the stack. Returns its NodeId.
-    pub fn push<C: Component>(&mut self, component: C) -> NodeId {
+    /// The root node's ID.
+    pub fn root(&self) -> NodeId {
+        self.root
+    }
+
+    /// Add a component as a child of the given parent. Returns its NodeId.
+    pub fn append_child<C: Component>(&mut self, parent: NodeId, component: C) -> NodeId {
         let id = NodeId(self.nodes.len());
-        self.nodes.push(Node::new(component));
+        let mut node = Node::new(component);
+        node.parent = Some(parent);
+        self.nodes.push(node);
+        self.nodes[parent.0].children.push(id);
         id
+    }
+
+    /// Shorthand: add a component as a child of the root. Returns its NodeId.
+    pub fn push<C: Component>(&mut self, component: C) -> NodeId {
+        self.append_child(self.root, component)
     }
 
     /// Access a component's tracked state for mutation.
@@ -52,12 +70,51 @@ impl Renderer {
         self.nodes[id.0].frozen = true;
     }
 
+    /// List the children of a node.
+    pub fn children(&self, id: NodeId) -> &[NodeId] {
+        &self.nodes[id.0].children
+    }
+
+    /// Remove a node and all its descendants from the tree.
+    ///
+    /// # Panics
+    /// Panics if trying to remove the root node.
+    pub fn remove(&mut self, id: NodeId) {
+        assert!(id != self.root, "cannot remove root node");
+
+        // Remove from parent's children list
+        if let Some(parent) = self.nodes[id.0].parent {
+            self.nodes[parent.0].children.retain(|&child| child != id);
+        }
+
+        // Collect all descendants to mark as removed
+        let mut to_remove = vec![id];
+        let mut i = 0;
+        while i < to_remove.len() {
+            let node_id = to_remove[i];
+            let children = self.nodes[node_id.0].children.clone();
+            to_remove.extend(children);
+            i += 1;
+        }
+
+        // Mark removed nodes: clear their children and parent, set frozen
+        // We can't remove from the Vec without invalidating NodeIds,
+        // so we "tombstone" them by clearing children and setting height to 0.
+        for node_id in to_remove {
+            let node = &mut self.nodes[node_id.0];
+            node.children.clear();
+            node.parent = None;
+            node.frozen = true;
+            node.last_height = Some(0);
+            node.cached_buffer = None;
+        }
+    }
+
     /// Set the rendering width (e.g., on terminal resize).
     /// Invalidates all cached buffers since wrapping changes.
     pub fn set_width(&mut self, width: u16) {
         if self.width != width {
             self.width = width;
-            // Width change invalidates all caches
             for node in &mut self.nodes {
                 node.cached_buffer = None;
                 node.last_height = None;
@@ -70,68 +127,98 @@ impl Renderer {
         self.width
     }
 
-    /// Render all components into a Frame.
+    /// Render the component tree into a Frame.
     ///
-    /// Performs a measure pass (desired_height for each node),
-    /// allocates vertical space, then renders each node into
-    /// a single Buffer.
+    /// Recursively measures and renders from the root.
     pub fn render(&mut self) -> Frame {
-        // Measure pass: compute heights
-        let mut heights: Vec<u16> = Vec::with_capacity(self.nodes.len());
-        for node in &self.nodes {
-            let height = if node.frozen {
-                node.last_height.unwrap_or(0)
-            } else {
-                let state = node.state.inner_as_any();
-                node.component.desired_height_erased(self.width, state)
-            };
-            heights.push(height);
-        }
-
-        let total_height: u16 = heights.iter().sum();
+        let total_height = self.measure_height(self.root, self.width);
 
         if total_height == 0 || self.width == 0 {
             return Frame::new(Buffer::empty(Rect::new(0, 0, self.width, 0)));
         }
 
-        // Create the frame buffer
         let area = Rect::new(0, 0, self.width, total_height);
         let mut buffer = Buffer::empty(area);
 
-        // Render pass: each component gets its vertical slice
-        let mut y_offset: u16 = 0;
-        for (i, node) in self.nodes.iter_mut().enumerate() {
-            let h = heights[i];
-            if h == 0 {
-                continue;
-            }
-
-            let node_area = Rect::new(0, y_offset, self.width, h);
-
-            if node.frozen || !node.state.is_dirty() {
-                // Frozen or clean: copy from cached buffer if available
-                if let Some(ref cached) = node.cached_buffer {
-                    copy_buffer(cached, &mut buffer, node_area);
-                }
-            } else {
-                // Dirty: re-render the component
-                let state = node.state.inner_as_any();
-                node.component.render_erased(node_area, &mut buffer, state);
-
-                // Cache the rendered buffer
-                let mut node_buf = Buffer::empty(node_area);
-                copy_buffer_region(&buffer, &mut node_buf, node_area);
-                node.cached_buffer = Some(node_buf);
-
-                // Update cached height and clear dirty
-                node.last_height = Some(h);
-                node.state.clear_dirty();
-            }
-
-            y_offset = y_offset.saturating_add(h);
-        }
+        self.render_node(self.root, area, &mut buffer);
 
         Frame::new(buffer)
+    }
+
+    /// Recursively measure the height of a node and its children.
+    fn measure_height(&self, id: NodeId, width: u16) -> u16 {
+        let node = &self.nodes[id.0];
+
+        if node.frozen {
+            return node.last_height.unwrap_or(0);
+        }
+
+        if node.is_container() {
+            // Container: height = sum of children
+            node.children
+                .iter()
+                .map(|&child| self.measure_height(child, width))
+                .sum()
+        } else {
+            // Leaf: ask the component
+            let state = node.state.inner_as_any();
+            node.component.desired_height_erased(width, state)
+        }
+    }
+
+    /// Recursively render a node and its children into the buffer.
+    fn render_node(&mut self, id: NodeId, area: Rect, buffer: &mut Buffer) {
+        if area.height == 0 || area.width == 0 {
+            return;
+        }
+
+        let node = &self.nodes[id.0];
+        let is_container = node.is_container();
+
+        // Frozen or clean leaf: use cached buffer
+        if node.frozen || (!is_container && !node.state.is_dirty()) {
+            if let Some(ref cached) = node.cached_buffer {
+                copy_buffer(cached, buffer, area);
+            }
+            return;
+        }
+
+        if is_container {
+            // Render the container's own component first (background/border)
+            let state = self.nodes[id.0].state.inner_as_any();
+            self.nodes[id.0].component.render_erased(area, buffer, state);
+
+            // Layout and render children vertically
+            let children: Vec<NodeId> = self.nodes[id.0].children.clone();
+            let mut y_offset = area.y;
+            for child_id in children {
+                let child_height = self.measure_height(child_id, area.width);
+                if child_height == 0 {
+                    continue;
+                }
+                let child_area = Rect::new(area.x, y_offset, area.width, child_height);
+                self.render_node(child_id, child_area, buffer);
+                y_offset = y_offset.saturating_add(child_height);
+            }
+
+            // Cache and clean
+            let mut node_buf = Buffer::empty(area);
+            copy_buffer_region(buffer, &mut node_buf, area);
+            self.nodes[id.0].cached_buffer = Some(node_buf);
+            self.nodes[id.0].last_height = Some(area.height);
+            self.nodes[id.0].state.clear_dirty();
+        } else {
+            // Leaf: render the component
+            let state = self.nodes[id.0].state.inner_as_any();
+            self.nodes[id.0].component.render_erased(area, buffer, state);
+
+            // Cache and clean
+            let mut node_buf = Buffer::empty(area);
+            copy_buffer_region(buffer, &mut node_buf, area);
+            self.nodes[id.0].cached_buffer = Some(node_buf);
+            self.nodes[id.0].last_height = Some(area.height);
+            self.nodes[id.0].state.clear_dirty();
+        }
     }
 }
 
@@ -156,7 +243,7 @@ fn copy_buffer(src: &Buffer, dst: &mut Buffer, area: Rect) {
     }
 }
 
-/// Copy a region from one buffer to another buffer (both may have different areas).
+/// Copy a region from one buffer to another buffer.
 fn copy_buffer_region(src: &Buffer, dst: &mut Buffer, region: Rect) {
     for y in region.y..region.y + region.height {
         for x in region.x..region.x + region.width {
@@ -178,7 +265,6 @@ mod tests {
     use ratatui_core::text::Line;
     use ratatui_widgets::paragraph::Paragraph;
 
-    /// A simple test component that displays lines of text.
     struct TextBlock;
 
     impl Component for TextBlock {
@@ -199,6 +285,8 @@ mod tests {
         }
     }
 
+    // --- Existing tests (flat API, should still pass) ---
+
     #[test]
     fn render_empty_renderer() {
         let mut r = Renderer::new(80);
@@ -216,10 +304,8 @@ mod tests {
         assert_eq!(frame.area().height, 1);
         assert_eq!(frame.area().width, 10);
 
-        // Check buffer content
         let buf = frame.buffer();
-        let cell = &buf[(0, 0)];
-        assert_eq!(cell.symbol(), "h");
+        assert_eq!(buf[(0, 0)].symbol(), "h");
     }
 
     #[test]
@@ -235,8 +321,8 @@ mod tests {
         assert_eq!(frame.area().height, 2);
 
         let buf = frame.buffer();
-        assert_eq!(buf[(0, 0)].symbol(), "t"); // 'top' at row 0
-        assert_eq!(buf[(0, 1)].symbol(), "b"); // 'bot' at row 1
+        assert_eq!(buf[(0, 0)].symbol(), "t");
+        assert_eq!(buf[(0, 1)].symbol(), "b");
     }
 
     #[test]
@@ -245,12 +331,8 @@ mod tests {
         let id = r.push(TextBlock);
         r.state_mut::<TextBlock>(id).push("hello".to_string());
 
-        // State should be dirty after mutation
         assert!(r.nodes[id.0].state.is_dirty());
-
         let _ = r.render();
-
-        // State should be clean after render
         assert!(!r.nodes[id.0].state.is_dirty());
     }
 
@@ -260,17 +342,10 @@ mod tests {
         let id = r.push(TextBlock);
         r.state_mut::<TextBlock>(id).push("hello".to_string());
 
-        // First render populates cache
         let _frame1 = r.render();
-
-        // Freeze the component
         r.freeze(id);
 
-        // Mutate state (shouldn't affect rendering since frozen)
-        // We can't actually mutate since it's frozen, but let's verify
-        // the frozen render returns the same content
         let frame2 = r.render();
-
         assert_eq!(frame2.area().height, 1);
         assert_eq!(frame2.buffer()[(0, 0)].symbol(), "h");
     }
@@ -280,18 +355,131 @@ mod tests {
         let mut r = Renderer::new(10);
         let id = r.push(TextBlock);
 
-        // Empty state -> height 0
         let frame1 = r.render();
         assert_eq!(frame1.area().height, 0);
 
-        // Add a line -> height 1
         r.state_mut::<TextBlock>(id).push("line1".to_string());
         let frame2 = r.render();
         assert_eq!(frame2.area().height, 1);
 
-        // Add another -> height 2
         r.state_mut::<TextBlock>(id).push("line2".to_string());
         let frame3 = r.render();
         assert_eq!(frame3.area().height, 2);
+    }
+
+    // --- New tree tests ---
+
+    #[test]
+    fn root_exists() {
+        let r = Renderer::new(80);
+        let root = r.root();
+        assert_eq!(root, NodeId(0));
+        assert!(r.children(root).is_empty());
+    }
+
+    #[test]
+    fn append_child_creates_tree() {
+        let mut r = Renderer::new(10);
+        let root = r.root();
+        let child = r.append_child(root, TextBlock);
+
+        assert_eq!(r.children(root), &[child]);
+    }
+
+    #[test]
+    fn nested_containers() {
+        let mut r = Renderer::new(10);
+
+        // Root -> container -> two text blocks
+        let container = r.push(VStack);
+        let child1 = r.append_child(container, TextBlock);
+        let child2 = r.append_child(container, TextBlock);
+
+        r.state_mut::<TextBlock>(child1).push("first".to_string());
+        r.state_mut::<TextBlock>(child2).push("second".to_string());
+
+        let frame = r.render();
+        assert_eq!(frame.area().height, 2);
+
+        let buf = frame.buffer();
+        assert_eq!(buf[(0, 0)].symbol(), "f"); // "first"
+        assert_eq!(buf[(0, 1)].symbol(), "s"); // "second"
+    }
+
+    #[test]
+    fn deeply_nested_tree() {
+        let mut r = Renderer::new(10);
+
+        // Root -> outer -> inner -> text
+        let outer = r.push(VStack);
+        let inner = r.append_child(outer, VStack);
+        let text = r.append_child(inner, TextBlock);
+
+        r.state_mut::<TextBlock>(text).push("deep".to_string());
+
+        let frame = r.render();
+        assert_eq!(frame.area().height, 1);
+        assert_eq!(frame.buffer()[(0, 0)].symbol(), "d");
+    }
+
+    #[test]
+    fn mixed_flat_and_nested() {
+        let mut r = Renderer::new(10);
+
+        // Root has: a flat text block + a container with two children
+        let flat = r.push(TextBlock);
+        r.state_mut::<TextBlock>(flat).push("flat".to_string());
+
+        let container = r.push(VStack);
+        let nested1 = r.append_child(container, TextBlock);
+        let nested2 = r.append_child(container, TextBlock);
+        r.state_mut::<TextBlock>(nested1).push("nest1".to_string());
+        r.state_mut::<TextBlock>(nested2).push("nest2".to_string());
+
+        let frame = r.render();
+        assert_eq!(frame.area().height, 3);
+
+        let buf = frame.buffer();
+        assert_eq!(buf[(0, 0)].symbol(), "f"); // "flat"
+        assert_eq!(buf[(0, 1)].symbol(), "n"); // "nest1"
+        assert_eq!(buf[(0, 2)].symbol(), "n"); // "nest2"
+    }
+
+    #[test]
+    fn remove_node() {
+        let mut r = Renderer::new(10);
+        let id1 = r.push(TextBlock);
+        let id2 = r.push(TextBlock);
+
+        r.state_mut::<TextBlock>(id1).push("keep".to_string());
+        r.state_mut::<TextBlock>(id2).push("remove".to_string());
+
+        // Render with both
+        let frame1 = r.render();
+        assert_eq!(frame1.area().height, 2);
+
+        // Remove second
+        r.remove(id2);
+
+        let frame2 = r.render();
+        assert_eq!(frame2.area().height, 1);
+        assert_eq!(frame2.buffer()[(0, 0)].symbol(), "k"); // "keep"
+    }
+
+    #[test]
+    fn remove_container_removes_children() {
+        let mut r = Renderer::new(10);
+
+        let container = r.push(VStack);
+        let child = r.append_child(container, TextBlock);
+        r.state_mut::<TextBlock>(child).push("gone".to_string());
+
+        let frame1 = r.render();
+        assert_eq!(frame1.area().height, 1);
+
+        r.remove(container);
+
+        let frame2 = r.render();
+        assert_eq!(frame2.area().height, 0);
     }
 }

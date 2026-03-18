@@ -73,6 +73,24 @@ pub trait Component: Send + Sync + 'static {
     fn initial_state(&self) -> Self::State;
 }
 
+/// A no-op container component for vertical stacking.
+///
+/// VStack renders nothing itself — children determine all sizing
+/// and content. Used as the implicit root component of a Renderer.
+pub struct VStack;
+
+impl Component for VStack {
+    type State = ();
+
+    fn render(&self, _area: Rect, _buf: &mut Buffer, _state: &()) {}
+
+    fn desired_height(&self, _width: u16, _state: &()) -> u16 {
+        0
+    }
+
+    fn initial_state(&self) -> () {}
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

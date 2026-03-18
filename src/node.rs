@@ -72,6 +72,8 @@ pub(crate) struct Node {
     pub frozen: bool,
     pub cached_buffer: Option<Buffer>,
     pub last_height: Option<u16>,
+    pub children: Vec<NodeId>,
+    pub parent: Option<NodeId>,
 }
 
 impl Node {
@@ -83,6 +85,13 @@ impl Node {
             frozen: false,
             cached_buffer: None,
             last_height: None,
+            children: Vec::new(),
+            parent: None,
         }
+    }
+
+    /// Whether this node has children (is a container).
+    pub fn is_container(&self) -> bool {
+        !self.children.is_empty()
     }
 }

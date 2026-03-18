@@ -28,7 +28,17 @@ impl InlineRenderer {
         }
     }
 
-    /// Add a component to the bottom of the stack. Returns its NodeId.
+    /// The root node's ID.
+    pub fn root(&self) -> NodeId {
+        self.renderer.root()
+    }
+
+    /// Add a component as a child of the given parent. Returns its NodeId.
+    pub fn append_child<C: Component>(&mut self, parent: NodeId, component: C) -> NodeId {
+        self.renderer.append_child(parent, component)
+    }
+
+    /// Shorthand: add a component as a child of the root. Returns its NodeId.
     pub fn push<C: Component>(&mut self, component: C) -> NodeId {
         self.renderer.push(component)
     }
@@ -41,6 +51,16 @@ impl InlineRenderer {
     /// Freeze a component (skip future re-renders).
     pub fn freeze(&mut self, id: NodeId) {
         self.renderer.freeze(id)
+    }
+
+    /// Remove a node and all its descendants.
+    pub fn remove(&mut self, id: NodeId) {
+        self.renderer.remove(id)
+    }
+
+    /// List the children of a node.
+    pub fn children(&self, id: NodeId) -> &[NodeId] {
+        self.renderer.children(id)
     }
 
     /// Set the rendering width.

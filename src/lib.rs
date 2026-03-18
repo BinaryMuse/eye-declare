@@ -6,7 +6,7 @@ pub mod node;
 pub mod renderer;
 
 // Re-export key types at the crate root for convenience
-pub use component::{Component, EventResult, Tracked};
+pub use component::{Component, EventResult, Tracked, VStack};
 pub use escape::CursorState;
 pub use frame::{Diff, Frame};
 pub use inline::InlineRenderer;
