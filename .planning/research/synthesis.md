@@ -2,7 +2,7 @@
 
 ## The Design Space
 
-We're building a **declarative rendering library** for **inline** (non-alt-screen) terminal UIs, targeting an AI-native shell proxy built on Atuin Hex. The library must support multiple rendering modes — from growing inline conversations to fixed status bars — while remaining host-agnostic so it works both as a standalone renderer and as a component within Hex's PTY proxy architecture.
+eye_declare is a **declarative rendering library** for **inline** (non-alt-screen) terminal UIs, targeting an AI-native shell proxy built on Atuin Hex. The library supports multiple rendering modes — from growing inline conversations to fixed status bars — while remaining host-agnostic so it works both as a standalone renderer and embedded within Hex's PTY proxy architecture.
 
 The research covers two mature reference architectures (pi-tui, Codex tui2), one mature declarative API pattern (iocraft), the Ratatui modular crate ecosystem, and the Atuin Hex PTY proxy internals.
 
@@ -14,9 +14,9 @@ The research covers two mature reference architectures (pi-tui, Codex tui2), one
 
 **UI rendering needs span a spectrum:**
 
-- **Growing inline regions** (primary): AI conversations that appear inline, grow as messages stream in, and become normal scrollback when done. The coding agent pattern.
-- **Fixed regions** (status bar): A bottom bar showing agent status, updated independently of shell output. Uses terminal scroll regions to reserve space.
-- **Floating overlays** (popups): Config menus, autocomplete, agent status cards that appear over shell output temporarily.
+- **Growing inline regions** (primary, implemented): AI conversations that appear inline, grow as messages stream in, and become normal scrollback when done.
+- **Fixed regions** (status bar, designed): A bottom bar showing agent status, updated independently of shell output. Uses terminal scroll regions to reserve space.
+- **Floating overlays** (popups, designed): Config menus, autocomplete, agent status cards that appear over shell output temporarily.
 
 **Deferred**: Full terminal multiplexing (side panes). Too complex, and carries the same scrollback/copy-paste issues as tmux.
 
@@ -25,147 +25,28 @@ The research covers two mature reference architectures (pi-tui, Codex tui2), one
 ## Reference Architectures
 
 ### pi-tui: Line-Level Retained Components
-- Components are persistent objects returning `string[]` (ANSI-encoded lines)
-- Components own their caching — `render(width)` returns cached output unless `invalidate()` was called
+- Components return `string[]` (ANSI-encoded lines), own their caching
 - Diff is line-level: find first changed line, rewrite from there to end
-- Scrollback is implicit — content scrolls off the top naturally
 - Full clear on resize (destroys scrollback)
 - Simple, ~1200 LOC for the core
 
 ### Codex tui2: Cell-Level App-Owned Viewport
-- `HistoryCell` trait as unit of content — returns `Vec<Line<'static>>`
-- Two-layer cache: wrapped transcript lines + rasterized cell buffers
-- Content-relative scroll anchors (`TranscriptLineMeta`) survive resizes
-- Cell-level high-water mark for explicit scrollback printing
+- `HistoryCell` trait, two-layer cache, content-relative scroll anchors
 - Display-time-only wrapping via byte-range span slicing
-- Uses alt-screen (not inline) — but the data model is portable
+- Uses alt-screen — data model is portable but rendering context differs
 
-### Ratatui Primitives Available
+### Ratatui Primitives (what we use)
 - `ratatui-core`: Buffer, Cell, Rect, Layout, Style, Widget/StatefulWidget traits
-- `ratatui-widgets`: All 16 built-in widgets render into `&mut Buffer` with zero backend deps
-- `Buffer::diff()` is a standalone pure method — we can use it directly
-- Layout is pure Rect math (Cassowary solver, cached)
-- We do NOT need Terminal, Frame, or any backend crate
-
-### Atuin Hex PTY Proxy
-- Transparent PTY proxy with 4 threads: stdin→PTY, PTY→stdout, shadow vt100 parser, SIGWINCH handler
-- OSC 133 zone tracking: knows when shell is in Prompt/Input/Output/Unknown states
-- Unix socket API: child processes connect to request screen snapshots
-- Pop-over mechanism: child process takes terminal, renders UI, restores screen from saved state
-- No direct UI injection — child processes own the terminal during pop-overs
+- `ratatui-widgets` (with `unstable-rendered-line-info` feature): Paragraph with `wrap()` and `line_count()`
+- `Buffer::diff()` as a standalone pure method
+- `crossterm`: terminal I/O, event types (used directly, not via ratatui-crossterm)
+- `unicode-width`: correct display width for CJK/emoji
 
 ---
 
-## Architectural Decisions
+## What's Built (as of Phase 4)
 
-### Decision 1: Host Integration Model — Render-to-Buffer (Model C)
-
-eye_declare is a **pure rendering engine** that does not own the terminal. It renders component trees into buffers and produces escape sequence output. The host application decides when and where to write that output.
-
-**Layered API:**
-
-```rust
-// Layer 1: Component tree → Buffer (pure, no I/O)
-let frame = renderer.render(width, height);
-
-// Layer 2: Buffer → Diff (pure)
-let diff = frame.diff(&previous_frame);
-
-// Layer 3: Diff → escape sequences (pure, produces bytes)
-let output: Vec<u8> = diff.to_escape_sequences(&mut cursor_state);
-// Wrapped in DEC 2026 synchronized output
-
-// Layer 4: Write to terminal (caller's responsibility)
-// Standalone: stdout.write_all(&output)?;
-// Hex: hex.inject_output(&output);
-```
-
-**Rationale:**
-- Hex needs to composite multiple eye_declare render targets onto one terminal (inline UI, status bar, overlays)
-- eye_declare stays testable without a real terminal
-- The same library works in standalone mode (atuin ai chat) and embedded in Hex
-- A convenience `Terminal` wrapper for the standalone/pop-over case is trivial sugar on top
-
-### Decision 2: Rendering Modes
-
-eye_declare supports three rendering modes, all built on the same "render into a rectangle" core:
-
-**Mode 1 — Growing inline region** (primary use case):
-- Component tree renders at full width, grows vertically as content accumulates
-- Old content scrolls into terminal scrollback naturally (implicit scrollback, pi-tui model)
-- Cursor position tracked by the renderer
-- Frozen components stop contributing diffs, preventing "change above viewport" full-clears
-- This is where streaming content, display-time wrapping, and the freeze lifecycle apply
-
-**Mode 2 — Fixed region** (status bar, reserved space):
-- Component tree renders into a fixed-size Rect that doesn't grow
-- Content updates in place via cell-level diffing
-- Host (Hex) manages terminal scroll regions to reserve space and handles placement
-- eye_declare just renders into the Rect it's given
-
-**Mode 3 — Floating overlay** (popups, config menus):
-- Identical to Mode 2 from eye_declare's perspective (fixed Rect, diff in place)
-- Host (Hex) manages save/restore of underlying content and overlay placement
-- eye_declare doesn't know it's an overlay
-
-**From eye_declare's perspective**, Mode 2 and 3 are the same — render into a fixed Rect. Mode 1 is the complex one with unique scrollback/growth/freeze semantics.
-
-### Decision 3: Diff Granularity — Cell-Level Viewport Diffing
-
-Components render into `Buffer` (Ratatui's cell grid). `Buffer::diff()` produces minimal cell-level changes within the viewport region.
-
-**Rationale:**
-- **Compatible with all existing Ratatui widgets** (Paragraph, List, Table, Block, tui-textarea, etc.)
-- Sub-line precision for minimal terminal writes
-- Performance bounded by viewport size: ~55μs for 200×50 terminal (kruci benchmarks)
-- For Mode 1 (growing inline), only the viewport-sized buffer is diffed — not the full content history
-
-### Decision 4: Component Model — Retained Components with Dirty Tracking
-
-Foundation layer: retained components implementing a trait. Components are persistent objects that the framework calls `render()` on each frame, with dirty tracking to skip clean components.
-
-**Designed for future declarative layer**: The retained component tree is structured to support a React-style declarative API (component functions + hooks + element macro) layered on top later. The declarative layer would produce and manage the retained component tree.
-
-### Decision 5: Layout — Intrinsic Sizing with Two-Pass Measure/Layout
-
-Components declare `desired_height(width)`. The framework queries components and allocates space in two passes: measure, then layout.
-
-**Rationale:**
-- Chat-style UIs need variable-height components (a message wraps to N lines at width W)
-- Ratatui's Layout splits space without querying component sizes — insufficient
-- Taffy/flexbox is overkill for primarily-vertical layouts
-- Layout abstraction is pluggable — if complex layouts are needed later, Taffy can be added as an alternative layout strategy without changing the component model
-
-### Decision 6: Scrollback Commit — Implicit with Freeze Points
-
-Content scrolls into terminal scrollback naturally (pi-tui model). Components can be "frozen" — the framework stops re-rendering them, they contribute no diffs, and they never trigger full-clear paths.
-
-**Freeze lifecycle:**
-1. Component is live — rendered each frame, participates in diffing
-2. Component content is complete (e.g., AI message finished streaming)
-3. Component is frozen — cached output is returned, framework skips re-rendering
-4. Content scrolls above viewport — becomes immutable terminal scrollback
-5. On resize: only need to redraw from first non-frozen component
-
-### Decision 7: Streaming Content — Display-Time-Only Wrapping
-
-Components store logical content (not pre-wrapped). Wrapping is computed at render time based on current viewport width. Token-by-token updates invalidate only the streaming component. Cell-level diff handles the minimal update.
-
-### Decision 8: Event/Input Handling — Minimal, Host-Delivered
-
-eye_declare does NOT own the event loop. The host delivers events:
-
-```rust
-renderer.handle_event(event) -> EventResult
-```
-
-The framework routes events to the focused component with bubble-up propagation. Focus management is built in. The host (Hex or standalone wrapper) decides which events to deliver vs handle itself (e.g., Hex routes some keys to the shell, some to eye_declare).
-
-A convenience `Terminal` wrapper for standalone use provides event loop integration with crossterm.
-
----
-
-## Proposed Architecture Stack
+### Architecture Stack
 
 ```
 ┌─────────────────────────────────────────────────┐
@@ -176,27 +57,38 @@ A convenience `Terminal` wrapper for standalone use provides event loop integrat
 │  - Routes input events                          │
 │  - Writes eye_declare output to terminal        │
 ├─────────────────────────────────────────────────┤
-│  eye_declare: Convenience Layer (optional)      │
-│  - Terminal wrapper for standalone use          │
-│  - Event loop integration with crossterm        │
+│  eye_declare: Terminal (optional convenience)   │
+│  - Event loop with crossterm                    │
+│  - Raw mode, resize handling, Ctrl+C exit       │
 │  - Direct stdout writing                        │
 ├─────────────────────────────────────────────────┤
-│  eye_declare: Component Framework               │
-│  - Component trait (render, measure, event,     │
-│    freeze, dirty tracking)                      │
-│  - Component tree management                    │
-│  - Intrinsic layout (measure/layout passes)     │
-│  - Focus management & event routing             │
-│  - Future: declarative API layer (hooks, macros)│
+│  eye_declare: InlineRenderer                    │
+│  - Growing-region mode (cursor mgmt, newline    │
+│    claiming, scrollback)                        │
+│  - Resize (clear screen + re-render)            │
+│  - Cursor positioning from focused component    │
 ├─────────────────────────────────────────────────┤
-│  eye_declare: Rendering Engine                  │
-│  - Viewport Buffer management                   │
+│  eye_declare: Renderer                          │
+│  - Component tree (NodeId arena, parent/child)  │
+│  - Recursive measure + render                   │
+│  - Dirty tracking (Tracked<S> auto-dirty)       │
+│  - force_dirty on width change                  │
+│  - Freeze lifecycle (cached buffers)            │
+│  - Focus management + Tab cycling               │
+│  - Event delivery with bubble-up propagation    │
+├─────────────────────────────────────────────────┤
+│  eye_declare: Frame / Diff / Escape             │
 │  - Cell-level diffing (Buffer::diff)            │
-│  - Escape sequence generation                   │
-│  - Cursor state tracking                        │
-│  - Synchronized output (DEC 2026) wrapping      │
-│  - Growing-region mode (cursor mgmt, scrollback)│
-│  - Fixed-region mode (in-place updates)         │
+│  - Height-mismatch padding for growing content  │
+│  - Relative cursor movement (no absolute pos)   │
+│  - DEC 2026 synchronized output wrapping        │
+│  - SGR style diffing (minimal escape sequences) │
+├─────────────────────────────────────────────────┤
+│  Built-in Components                            │
+│  - TextBlock: display-time word wrapping        │
+│  - Spinner: animated with tick/complete         │
+│  - Markdown: bold, italic, code, headings, lists│
+│  - VStack: pure vertical container              │
 ├─────────────────────────────────────────────────┤
 │  ratatui-core         │  crossterm              │
 │  (Buffer, Cell, Rect, │  (escape sequences,     │
@@ -205,202 +97,144 @@ A convenience `Terminal` wrapper for standalone use provides event loop integrat
 └─────────────────────────────────────────────────┘
 ```
 
-## Resolved Design Questions
+### Module Map
 
-### Q1: Component Tree Ownership — External (Framework-Managed)
+| Module | Purpose |
+|--------|---------|
+| `component.rs` | `Component` trait, `Tracked<S>`, `EventResult`, `VStack` |
+| `node.rs` | `NodeId`, `Node`, type-erasure traits (`AnyComponent`, `AnyTrackedState`) |
+| `renderer.rs` | Tree management, recursive measure/render, focus, Tab cycling, event delivery |
+| `frame.rs` | `Frame` (owns Buffer), `Diff` (changed cells), height-mismatch handling |
+| `escape.rs` | `CursorState`, relative cursor movement, SGR diffing, DEC 2026 wrapping |
+| `inline.rs` | `InlineRenderer` — growing region, cursor tracking, resize |
+| `terminal.rs` | `Terminal` — convenience event loop wrapper for standalone use |
+| `wrap.rs` | `wrapped_line_count()`, `wrapping_paragraph()` utilities |
+| `components/text.rs` | `TextBlock` — styled text with display-time wrapping |
+| `components/spinner.rs` | `Spinner` — animated spinner with completion state |
+| `components/markdown.rs` | `Markdown` — inline formatting, code blocks, headings, lists |
 
-The framework owns the tree structure. Components don't know about children — they only know how to render themselves and measure themselves. Users create components and hand them to the framework; the framework manages parent/child relationships via `NodeId` handles.
+### Actual Component Trait (implemented)
 
 ```rust
-let message = AgentMessage::new("Hello world");
-let id = renderer.root().append_child(Box::new(message));
-```
+pub trait Component: Send + Sync + 'static {
+    type State: Send + Sync + 'static;
 
-**Rationale:** Enables the future React-style declarative layer (which needs a reconciler that manages the tree), avoids components needing to implement tree traversal, and makes dynamic tree manipulation straightforward.
+    fn render(&self, area: Rect, buf: &mut Buffer, state: &Self::State);
+    fn desired_height(&self, width: u16, state: &Self::State) -> u16;
+    fn initial_state(&self) -> Self::State;
 
-### Q2: State Flow — External with Automatic Dirty Tracking
-
-Component state is a separate associated type, owned and wrapped by the framework in `Tracked<S>`. Any `&mut` access to state automatically marks the component content-dirty via `DerefMut`.
-
-```rust
-pub struct Tracked<S> {
-    inner: S,
-    dirty: bool,
-}
-
-impl<S> DerefMut for Tracked<S> {
-    fn deref_mut(&mut self) -> &mut S {
-        self.dirty = true;
-        &mut self.inner
-    }
+    // Optional with defaults:
+    fn handle_event(&self, event: &Event, state: &mut Self::State) -> EventResult { Ignored }
+    fn is_focusable(&self, state: &Self::State) -> bool { false }
+    fn cursor_position(&self, area: Rect, state: &Self::State) -> Option<(u16, u16)> { None }
 }
 ```
 
-**Rationale:** Component authors never manually manage dirty flags. The framework detects mutations automatically. Small API cost (separate `State` type) for a big correctness win — no forgotten `set_dirty()` calls.
+### Key Differences from Original Design
 
-### Q3: Dirty Propagation — Two-Level (Content vs Layout)
+- `desired_height` returns `u16` not `Option<u16>` — fill-height deferred until flexible layout is needed
+- No separate `Tree` handle — tree manipulation is directly on `Renderer` (`append_child`, `push`, `remove`, `children`)
+- `Node.force_dirty` flag for framework-initiated re-renders (width change) alongside `Tracked<S>` auto-dirty
+- Escape generation uses relative movement only (no absolute positioning) — critical for inline rendering
+- `Terminal` wrapper uses synchronous crossterm events, not async
 
-Two distinct dirty flags per node:
+### Test Coverage: 73 tests
 
-- **Content dirty**: "my rendered output changed." Triggers re-render of this component's buffer region. Does NOT propagate upward. Common (streaming tokens, animations).
-- **Layout dirty**: "my size changed." Triggers parent re-layout, which may cascade upward. Rare (content wrapping to a new line count).
+- `component.rs`: Tracked<S> dirty behavior (4 tests)
+- `frame.rs`: Diff with identical, changed, growing, shrinking frames (5 tests)
+- `escape.rs`: Sync wrapping, relative movement, style diffing (5 tests)
+- `wrap.rs`: Line counting with wrapping, empty text, zero width (7 tests)
+- `renderer.rs`: Flat rendering, tree nesting, dirty tracking, freeze, remove, events, focus cycling (24 tests)
+- `inline.rs`: First render, no-change, growing content (4 tests)
+- `components/text.rs`: Wrapping, height, styling, render (7 tests)
+- `components/spinner.rs`: Height, render, completion, tick (4 tests)
+- `components/markdown.rs`: All formatting types, wrapping, streaming (12 tests)
+- Doc test in terminal.rs (1 test)
 
-Layout-dirty is detected by caching the last `desired_height` result and comparing after state mutation. Only layout changes propagate upward. This keeps propagation infrequent and O(tree depth) — negligible for the shallow trees in chat-style UIs.
+### Examples: 7
 
-### Q4: Resize Strategy — Re-render from Viewport Top, Preserve Scrollback
-
-On terminal resize:
-1. All components marked layout-dirty (width changed, wrapping changes)
-2. Re-render from the topmost **visible** component downward
-3. Write a full viewport update (entire viewport is stale after resize)
-4. Frozen content already in scrollback stays at old wrapping — visual discontinuity at the boundary, accepted tradeoff (same as pi-tui and Codex tui2)
-
-No `\x1b[3J` scrollback clear. Old scrollback stays intact with old wrapping. New content flows at new width.
-
-### Q5: Frozen Component Buffers — Retain with Expiry
-
-Keep a `HashMap<NodeId, Buffer>` for frozen components. Enables resize reflow when the buffer is available. Evict oldest entries when count/memory exceeds a threshold. If a frozen component's buffer has been evicted and is needed (e.g., it scrolls back into the viewport during resize), re-render it on demand — "frozen" means content won't change, not that the component is gone.
+| Example | Demonstrates |
+|---------|-------------|
+| `growing` | Basic growing inline text |
+| `agent_sim` | Animated agent conversation with spinners + streaming |
+| `nested` | Multi-turn conversation with tree composition |
+| `wrapping` | Live resize reflow with crossterm events |
+| `interactive` | Text input with wrapping + cursor positioning |
+| `terminal_demo` | Terminal wrapper with Tab cycling between two inputs |
+| `markdown_demo` | Streamed markdown response with full formatting |
 
 ---
 
-## Core API Sketch
+## Resolved Design Decisions
+
+### Rendering
+- **Cell-level diffing** via `Buffer::diff()` — compatible with all ratatui widgets
+- **Relative cursor movement only** — no absolute positioning, correct for inline rendering
+- **DEC 2026 synchronized output** — atomic frame display, always emitted (no feature detection)
+- **Cursor hidden during writes**, shown only at focused component's cursor position after render
+
+### Component Model
+- **External state** with `Tracked<S>` auto-dirty via `DerefMut`
+- **Framework-managed tree** — components don't know about children
+- **Intrinsic sizing** — `desired_height(width)` with vertical stacking
+- **Freeze lifecycle** — frozen components skip re-render, use cached buffers
+- **Type erasure** via `AnyComponent`/`AnyTrackedState` with `Any` downcasting
+
+### Event Handling
+- **Host delivers events** — eye_declare doesn't own the event loop
+- **Focus + bubble-up** — events go to focused component, Ignored bubbles to parent
+- **Tab cycling** — framework walks tree DFS for focusable components
+- **Cursor positioning** — `cursor_position()` on Component, framework positions hardware cursor
+
+### Scrollback & Resize
+- **Implicit scrollback** — content scrolls off naturally (pi-tui model)
+- **Standalone resize** — clear visible screen + re-render (scrollback preserved at old width)
+- **Hex-assisted resize** (designed, not built) — Hex's shadow vt100 parser diffs against fresh render for smooth reflow without clearing
+
+---
+
+## What's Next
+
+### Near-term: Declarative Layer (the big piece)
+
+React-style component-level composition where components return element trees instead of rendering into buffers:
 
 ```rust
-/// The result of handling an event.
-pub enum EventResult {
-    /// Event was consumed by this component.
-    Consumed,
-    /// Event was not handled; propagate to parent.
-    Ignored,
-}
-
-/// A component that can render itself into a terminal region.
-/// Components are stateless renderers — state lives in the
-/// associated State type, managed by the framework.
-pub trait Component: Send + Sync {
-    /// State type for this component. Framework wraps it in
-    /// Tracked<S> for automatic dirty detection.
-    type State: Send + Sync + 'static;
-
-    /// Render into the given buffer region using current state.
-    /// Can use any ratatui Widget internally.
-    fn render(&self, area: Rect, buf: &mut Buffer, state: &Self::State);
-
-    /// How tall at the given width? None = fill available space.
-    fn desired_height(&self, width: u16, state: &Self::State) -> Option<u16>;
-
-    /// Handle an input event, potentially mutating state.
-    fn handle_event(
-        &self,
-        event: &Event,
-        state: &mut Self::State,
-    ) -> EventResult {
-        EventResult::Ignored
+fn render(&self, state: &Self::State) -> Element {
+    element! {
+        VStack {
+            for msg in &state.messages {
+                TextBlock { text: msg.text, style: msg.style }
+            }
+            Spinner { label: "Thinking..." }
+        }
     }
-
-    /// Create the initial state for this component.
-    fn initial_state(&self) -> Self::State;
-}
-
-// --- Framework-managed tree node (internal) ---
-
-struct Node {
-    component: Box<dyn AnyComponent>,   // type-erased Component
-    state: Box<dyn AnyTrackedState>,    // Tracked<S>, type-erased
-    children: Vec<NodeId>,
-    parent: Option<NodeId>,
-    cached_buffer: Option<Buffer>,
-    frozen: bool,
-    content_dirty: bool,
-    layout_dirty: bool,
-    last_height: Option<u16>,           // cached desired_height result
-    layout_rect: Option<Rect>,          // assigned by parent/framework
-}
-
-// --- Public renderer API ---
-
-/// Manages a component tree and produces frame output.
-/// The host creates one Renderer per rendering region.
-pub struct Renderer { /* ... */ }
-
-impl Renderer {
-    /// Create a new renderer with a root component.
-    pub fn new(root: impl Component + 'static) -> Self { ... }
-
-    /// Access the tree for structural manipulation.
-    pub fn tree(&mut self) -> &mut Tree { ... }
-
-    /// Render the component tree at the given dimensions.
-    /// Returns ready-to-use frame output.
-    pub fn render(&mut self, width: u16, height: u16) -> Frame { ... }
-
-    /// Deliver an event to the focused component.
-    pub fn handle_event(&mut self, event: &Event) -> EventResult { ... }
-
-    /// Freeze a component (content finalized, skip future re-renders).
-    pub fn freeze(&mut self, id: NodeId) { ... }
-
-    /// Notify that terminal was resized. Marks all components
-    /// layout-dirty and triggers full viewport re-render on next
-    /// render() call.
-    pub fn resize(&mut self) { ... }
-}
-
-/// Tree manipulation handle.
-pub struct Tree { /* ... */ }
-
-impl Tree {
-    pub fn root(&self) -> NodeId { ... }
-    pub fn append_child(
-        &mut self,
-        parent: NodeId,
-        component: impl Component + 'static,
-    ) -> NodeId { ... }
-    pub fn remove(&mut self, id: NodeId) { ... }
-    pub fn insert_before(
-        &mut self,
-        sibling: NodeId,
-        component: impl Component + 'static,
-    ) -> NodeId { ... }
-}
-
-/// Output of a render pass.
-pub struct Frame { /* buffer contents */ }
-
-impl Frame {
-    /// Diff against previous frame.
-    pub fn diff(&self, previous: &Frame) -> Diff { ... }
-}
-
-/// Changes between two frames.
-pub struct Diff { /* changed cells */ }
-
-impl Diff {
-    /// Produce ready-to-write terminal escape sequences,
-    /// wrapped in DEC 2026 synchronized output.
-    pub fn to_escape_sequences(
-        &self,
-        cursor: &mut CursorState,
-    ) -> Vec<u8> { ... }
-
-    /// Whether any cells actually changed.
-    pub fn is_empty(&self) -> bool { ... }
-}
-
-// --- Convenience layer for standalone use ---
-
-/// Wraps a Renderer with a crossterm event loop and direct
-/// stdout writing. For use outside of Hex / PTY proxy contexts.
-pub struct Terminal { /* ... */ }
-
-impl Terminal {
-    pub fn new(renderer: Renderer) -> Self { ... }
-
-    /// Run the event loop. Handles rendering, input delivery,
-    /// resize events, and DEC 2026 synchronized writes to stdout.
-    pub async fn run(&mut self) -> io::Result<()> { ... }
 }
 ```
+
+The framework reconciles this description against the existing tree, creating/updating/removing nodes as needed. This is the reconciler pattern from React — the piece that makes the library truly declarative.
+
+**Key design questions:**
+- Element representation (enum vs trait object vs generic)
+- Reconciliation algorithm (keyed children for stable identity)
+- Hooks system (use_state, use_effect) vs current external state model
+- Whether to keep the current retained-component API as a lower-level escape hatch
+
+### Medium-term
+
+- **Focus scopes** — independent focus cycles for modals/popups (gpui-inspired)
+- **Bordered containers** — components that provide padding/border and pass inner area to children
+- **Hex integration** — experimental rendering within Hex's PTY proxy
+- **Scroll regions** — reserved terminal areas for fixed UI elements (status bar)
+
+### Longer-term
+
+- **Layout dirty propagation** — child height change cascades to parent re-layout
+- **Frozen buffer eviction** — LRU for long sessions
+- **Non-vertical layout** — horizontal splits, flexible layout strategies
+- **Accessibility** — screen reader support via terminal accessibility APIs
+
+---
 
 ## Research Index
 
@@ -411,4 +245,4 @@ impl Terminal {
 | `codex-tui2-architecture.md` | HistoryCell trait, viewport pipeline, scroll anchors, high-water mark, streaming, display-time wrapping |
 | `declarative-tui-patterns.md` | iocraft, tui-realm, cursive, dioxus-tui, bevy_ratatui, rxtui — API patterns and tradeoffs |
 | `pi-tui-architecture.md` | Retained component model, computeDiffRange, writePartialRender, scrollback policy, DEC 2026 integration |
-| `synthesis.md` | This document — consolidated decisions, architecture stack, core API sketch |
+| `synthesis.md` | This document — current architecture, implementation status, and roadmap |
