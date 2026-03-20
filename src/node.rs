@@ -99,19 +99,21 @@ impl<S: Send + Sync + 'static> AnyTrackedState for Tracked<S> {
     }
 }
 
-/// Type-erased tick handler for periodic callbacks.
-pub(crate) trait AnyTickHandler: Send + Sync {
+/// Type-erased effect handler. Used for all effect types (interval,
+/// mount, unmount, etc.) since they all share the same callback
+/// signature: `Fn(&mut C::State)`.
+pub(crate) trait AnyEffectHandler: Send + Sync {
     fn call(&self, tracked_state: &mut dyn Any);
 }
 
 /// Typed wrapper that captures a closure operating on `S` and downcasts
 /// the type-erased `Tracked<S>` at call time. `DerefMut` on `Tracked`
 /// automatically marks state dirty when the handler fires.
-pub(crate) struct TypedTickHandler<S: 'static> {
+pub(crate) struct TypedEffectHandler<S: 'static> {
     pub(crate) handler: Box<dyn Fn(&mut S) + Send + Sync>,
 }
 
-impl<S: Send + Sync + 'static> AnyTickHandler for TypedTickHandler<S> {
+impl<S: Send + Sync + 'static> AnyEffectHandler for TypedEffectHandler<S> {
     fn call(&self, tracked_state: &mut dyn Any) {
         if let Some(tracked) = tracked_state.downcast_mut::<Tracked<S>>() {
             use std::ops::DerefMut;
@@ -120,11 +122,20 @@ impl<S: Send + Sync + 'static> AnyTickHandler for TypedTickHandler<S> {
     }
 }
 
-/// A registered periodic callback for a node.
-pub(crate) struct TickRegistration {
-    pub handler: Box<dyn AnyTickHandler>,
-    pub interval: Duration,
-    pub last_tick: Instant,
+/// What kind of effect this is, and when it should fire.
+pub(crate) enum EffectKind {
+    /// Periodic callback. Fires when interval elapses during `tick()`.
+    Interval { interval: Duration, last_tick: Instant },
+    /// One-shot callback. Fires after element build completes.
+    OnMount,
+    /// One-shot callback. Fires when node is tombstoned.
+    OnUnmount,
+}
+
+/// A registered effect for a node.
+pub(crate) struct Effect {
+    pub handler: Box<dyn AnyEffectHandler>,
+    pub kind: EffectKind,
 }
 
 /// A node in the component tree. Framework-internal.

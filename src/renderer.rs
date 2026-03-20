@@ -9,7 +9,7 @@ use ratatui_core::{
 use crate::component::{Component, EventResult, Tracked, VStack};
 use crate::element::{ElementEntry, Elements};
 use crate::frame::Frame;
-use crate::node::{Node, NodeId, TickRegistration, TypedTickHandler};
+use crate::node::{Effect, EffectKind, Node, NodeId, TypedEffectHandler};
 
 /// Manages a tree of components and renders them into a Frame.
 ///
@@ -24,8 +24,8 @@ pub struct Renderer {
     /// After rendering, the absolute cursor position for the focused
     /// component (if it returns one from cursor_position).
     cursor_hint: Option<(u16, u16)>,
-    /// Registered periodic tick callbacks, keyed by NodeId.
-    ticks: HashMap<NodeId, TickRegistration>,
+    /// Registered effects per node. Multiple effects per node supported.
+    effects: HashMap<NodeId, Vec<Effect>>,
 }
 
 impl Renderer {
@@ -37,7 +37,7 @@ impl Renderer {
         nodes.push(Node::new(VStack));
         // Root starts clean since VStack has no visible content
         nodes[0].state.clear_dirty();
-        Self { nodes, root, width, focused: None, cursor_hint: None, ticks: HashMap::new() }
+        Self { nodes, root, width, focused: None, cursor_hint: None, effects: HashMap::new() }
     }
 
     /// The root node's ID.
@@ -242,6 +242,8 @@ impl Renderer {
             .copied()
     }
 
+    // --- Effect registration ---
+
     /// Register a periodic tick handler for a node.
     ///
     /// The handler receives `&mut C::State` and is called by [`tick()`]
@@ -255,21 +257,65 @@ impl Renderer {
         interval: Duration,
         handler: impl Fn(&mut C::State) + Send + Sync + 'static,
     ) {
-        self.ticks.insert(
-            id,
-            TickRegistration {
-                handler: Box::new(TypedTickHandler {
-                    handler: Box::new(handler),
-                }),
+        let effects = self.effects.entry(id).or_default();
+        // Remove any existing Interval (one tick per node)
+        effects.retain(|e| !matches!(e.kind, EffectKind::Interval { .. }));
+        effects.push(Effect {
+            handler: Box::new(TypedEffectHandler {
+                handler: Box::new(handler),
+            }),
+            kind: EffectKind::Interval {
                 interval,
                 last_tick: Instant::now(),
             },
-        );
+        });
     }
 
     /// Remove a tick registration for a node. No-op if none exists.
     pub fn unregister_tick(&mut self, id: NodeId) {
-        self.ticks.remove(&id);
+        if let Some(effects) = self.effects.get_mut(&id) {
+            effects.retain(|e| !matches!(e.kind, EffectKind::Interval { .. }));
+            if effects.is_empty() {
+                self.effects.remove(&id);
+            }
+        }
+    }
+
+    /// Register a mount handler for a node.
+    ///
+    /// The handler fires once after the element's `build()` completes
+    /// and the node is placed in the tree. It is then removed (one-shot).
+    pub fn on_mount<C: Component>(
+        &mut self,
+        id: NodeId,
+        handler: impl Fn(&mut C::State) + Send + Sync + 'static,
+    ) {
+        self.effects.entry(id).or_default().push(Effect {
+            handler: Box::new(TypedEffectHandler {
+                handler: Box::new(handler),
+            }),
+            kind: EffectKind::OnMount,
+        });
+    }
+
+    /// Register an unmount handler for a node.
+    ///
+    /// The handler fires once when the node is tombstoned (removed from
+    /// the tree), before children are recursively cleaned up.
+    pub fn on_unmount<C: Component>(
+        &mut self,
+        id: NodeId,
+        handler: impl Fn(&mut C::State) + Send + Sync + 'static,
+    ) {
+        let effects = self.effects.entry(id).or_default();
+        // Replace any existing OnUnmount
+        effects.retain(|e| !matches!(e.kind, EffectKind::OnUnmount));
+        effects.push(Effect {
+            handler: Box::new(TypedEffectHandler {
+                handler: Box::new(handler),
+            }),
+            kind: EffectKind::OnUnmount,
+        });
     }
 
     /// Advance all registered tick handlers based on elapsed wall clock time.
@@ -278,24 +324,32 @@ impl Renderer {
     /// likely needed).
     pub fn tick(&mut self) -> bool {
         let now = Instant::now();
-        let due: Vec<NodeId> = self
-            .ticks
-            .iter()
-            .filter(|(_, reg)| now.duration_since(reg.last_tick) >= reg.interval)
-            .map(|(id, _)| *id)
-            .collect();
+
+        // Collect (node_id, effect_index) pairs for due interval effects
+        let mut due: Vec<(NodeId, usize)> = Vec::new();
+        for (&id, effects) in &self.effects {
+            for (idx, effect) in effects.iter().enumerate() {
+                if let EffectKind::Interval { last_tick, interval } = &effect.kind {
+                    if now.duration_since(*last_tick) >= *interval {
+                        due.push((id, idx));
+                    }
+                }
+            }
+        }
 
         if due.is_empty() {
             return false;
         }
 
-        for id in due {
-            // Remove-call-reinsert to satisfy the borrow checker:
-            // we need &self.ticks (handler) and &mut self.nodes (state) simultaneously.
-            let mut reg = self.ticks.remove(&id).unwrap();
-            reg.last_tick = now;
-            reg.handler.call(self.nodes[id.0].state.as_any_mut());
-            self.ticks.insert(id, reg);
+        for (id, idx) in due {
+            // Remove the effect, call handler, reinsert with updated last_tick
+            let mut effects = self.effects.remove(&id).unwrap();
+            let effect = &mut effects[idx];
+            if let EffectKind::Interval { ref mut last_tick, .. } = effect.kind {
+                *last_tick = now;
+            }
+            effects[idx].handler.call(self.nodes[id.0].state.as_any_mut());
+            self.effects.insert(id, effects);
         }
 
         true
@@ -303,7 +357,46 @@ impl Renderer {
 
     /// Whether there are any active tick registrations.
     pub fn has_active(&self) -> bool {
-        !self.ticks.is_empty()
+        self.effects.values().any(|effects| {
+            effects.iter().any(|e| matches!(e.kind, EffectKind::Interval { .. }))
+        })
+    }
+
+    /// Fire and remove all OnMount effects for a node.
+    fn fire_mount(&mut self, id: NodeId) {
+        if let Some(effects) = self.effects.remove(&id) {
+            // Extract mount handlers, keep the rest
+            let (mounts, remaining): (Vec<_>, Vec<_>) = effects
+                .into_iter()
+                .partition(|e| matches!(e.kind, EffectKind::OnMount));
+
+            // Fire mount handlers
+            for effect in mounts {
+                effect.handler.call(self.nodes[id.0].state.as_any_mut());
+            }
+
+            // Reinsert remaining effects (if any)
+            if !remaining.is_empty() {
+                self.effects.insert(id, remaining);
+            }
+        }
+    }
+
+    /// Fire and remove all OnUnmount effects for a node.
+    fn fire_unmount(&mut self, id: NodeId) {
+        if let Some(effects) = self.effects.remove(&id) {
+            let (unmounts, remaining): (Vec<_>, Vec<_>) = effects
+                .into_iter()
+                .partition(|e| matches!(e.kind, EffectKind::OnUnmount));
+
+            for effect in unmounts {
+                effect.handler.call(self.nodes[id.0].state.as_any_mut());
+            }
+
+            if !remaining.is_empty() {
+                self.effects.insert(id, remaining);
+            }
+        }
     }
 
     /// Reconcile old children of `parent` against new element entries.
@@ -379,6 +472,7 @@ impl Renderer {
                 let id = entry.element.build(self, parent);
                 self.nodes[id.0].element_type_id = Some(entry.type_id);
                 self.nodes[id.0].key = entry.key;
+                self.fire_mount(id);
 
                 if let Some(children) = entry.children {
                     self.build_elements(id, children);
@@ -410,6 +504,7 @@ impl Renderer {
             let node_id = entry.element.build(self, parent);
             self.nodes[node_id.0].element_type_id = Some(entry.type_id);
             self.nodes[node_id.0].key = entry.key;
+            self.fire_mount(node_id);
             if let Some(children) = entry.children {
                 self.build_elements(node_id, children);
             }
@@ -419,7 +514,8 @@ impl Renderer {
     /// Tombstone a node and all its descendants without touching the
     /// parent's children list (caller is responsible for that).
     fn tombstone_subtree(&mut self, id: NodeId) {
-        self.ticks.remove(&id);
+        self.fire_unmount(id);
+        self.effects.remove(&id);
         let children = std::mem::take(&mut self.nodes[id.0].children);
         for child_id in children {
             self.tombstone_subtree(child_id);
@@ -1702,5 +1798,212 @@ mod tests {
         els.add(crate::elements::SpinnerEl::new("Done").done("Completed")).key("s");
         r.rebuild(container, els);
         assert!(!r.has_active());
+    }
+
+    // --- Mount/Unmount lifecycle tests ---
+
+    /// Element that registers mount and unmount handlers.
+    struct LifecycleEl {
+        label: String,
+        mount_marker: String,
+        unmount_marker: String,
+    }
+
+    impl LifecycleEl {
+        fn new(label: &str) -> Self {
+            Self {
+                label: label.to_string(),
+                mount_marker: format!("mounted:{}", label),
+                unmount_marker: format!("unmounted:{}", label),
+            }
+        }
+    }
+
+    /// Component with a log of lifecycle events.
+    struct LifecycleWidget;
+
+    impl Component for LifecycleWidget {
+        type State = Vec<String>; // log of events
+
+        fn render(&self, area: Rect, buf: &mut Buffer, state: &Self::State) {
+            let text = state.join(", ");
+            let line = ratatui_core::text::Line::raw(text);
+            ratatui_core::widgets::Widget::render(Paragraph::new(line), area, buf);
+        }
+
+        fn desired_height(&self, _width: u16, state: &Self::State) -> u16 {
+            if state.is_empty() { 0 } else { 1 }
+        }
+
+        fn initial_state(&self) -> Vec<String> {
+            Vec::new()
+        }
+    }
+
+    impl Element for LifecycleEl {
+        fn build(self: Box<Self>, renderer: &mut Renderer, parent: NodeId) -> NodeId {
+            let id = renderer.append_child(parent, LifecycleWidget);
+            renderer.state_mut::<LifecycleWidget>(id).push(self.label.clone());
+
+            let mount_marker = self.mount_marker;
+            renderer.on_mount::<LifecycleWidget>(id, move |state| {
+                state.push(mount_marker.clone());
+            });
+
+            let unmount_marker = self.unmount_marker;
+            renderer.on_unmount::<LifecycleWidget>(id, move |state| {
+                state.push(unmount_marker.clone());
+            });
+
+            id
+        }
+
+        fn update(self: Box<Self>, renderer: &mut Renderer, node_id: NodeId) {
+            let state = renderer.state_mut::<LifecycleWidget>(node_id);
+            // Clear and set label, but lifecycle log entries persist
+            state.retain(|s| s.starts_with("mounted:") || s.starts_with("unmounted:"));
+            state.push(self.label.clone());
+        }
+    }
+
+    #[test]
+    fn mount_fires_after_build() {
+        let mut r = Renderer::new(10);
+        let container = r.push(VStack);
+
+        let mut els = Elements::new();
+        els.add(LifecycleEl::new("hello")).key("a");
+        r.rebuild(container, els);
+
+        let id = r.find_by_key(container, "a").unwrap();
+        let state = r.state_mut::<LifecycleWidget>(id);
+        // Should have: label from build, then mount marker
+        assert!(state.contains(&"hello".to_string()));
+        assert!(state.contains(&"mounted:hello".to_string()));
+    }
+
+    #[test]
+    fn mount_fires_only_once_not_on_reuse() {
+        let mut r = Renderer::new(10);
+        let container = r.push(VStack);
+
+        // First build — mount fires
+        let mut els = Elements::new();
+        els.add(LifecycleEl::new("v1")).key("a");
+        r.rebuild(container, els);
+
+        let id = r.find_by_key(container, "a").unwrap();
+        let mount_count = r.state_mut::<LifecycleWidget>(id)
+            .iter()
+            .filter(|s| s.starts_with("mounted:"))
+            .count();
+        assert_eq!(mount_count, 1);
+
+        // Second rebuild — reuse, mount should NOT fire again
+        let mut els = Elements::new();
+        els.add(LifecycleEl::new("v2")).key("a");
+        r.rebuild(container, els);
+
+        let state = r.state_mut::<LifecycleWidget>(id);
+        let mount_count = state.iter().filter(|s| s.starts_with("mounted:")).count();
+        assert_eq!(mount_count, 1); // still just 1
+    }
+
+    #[test]
+    fn unmount_fires_on_tombstone() {
+        let mut r = Renderer::new(10);
+        let container = r.push(VStack);
+
+        let mut els = Elements::new();
+        els.add(LifecycleEl::new("bye")).key("a");
+        r.rebuild(container, els);
+
+        let id = r.find_by_key(container, "a").unwrap();
+
+        // Rebuild with empty — triggers tombstone
+        r.rebuild(container, Elements::new());
+
+        // The node is tombstoned, but we can still read its state
+        // (tombstoned nodes stay in the arena)
+        let state = r.state_mut::<LifecycleWidget>(id);
+        assert!(state.contains(&"unmounted:bye".to_string()));
+    }
+
+    #[test]
+    fn unmount_parent_fires_before_children() {
+        use std::sync::{Arc, Mutex};
+
+        let order: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+
+        let mut r = Renderer::new(10);
+        let container = r.push(VStack);
+
+        // Build parent with child
+        let parent_id = r.append_child(container, LifecycleWidget);
+        r.state_mut::<LifecycleWidget>(parent_id).push("parent".to_string());
+        let child_id = r.append_child(parent_id, LifecycleWidget);
+        r.state_mut::<LifecycleWidget>(child_id).push("child".to_string());
+
+        let order_clone = order.clone();
+        r.on_unmount::<LifecycleWidget>(parent_id, move |_state| {
+            order_clone.lock().unwrap().push("parent".to_string());
+        });
+        let order_clone = order.clone();
+        r.on_unmount::<LifecycleWidget>(child_id, move |_state| {
+            order_clone.lock().unwrap().push("child".to_string());
+        });
+
+        // Remove parent (which also removes child)
+        r.remove(parent_id);
+
+        let fired = order.lock().unwrap();
+        assert_eq!(&*fired, &["parent", "child"]);
+    }
+
+    #[test]
+    fn tombstone_cleans_up_all_effects() {
+        let mut r = Renderer::new(10);
+        let id = r.push(TextBlock);
+        r.state_mut::<TextBlock>(id).push("hello".to_string());
+
+        // Register tick + unmount
+        r.register_tick::<TextBlock>(id, Duration::from_millis(1), |_| {});
+        r.on_unmount::<TextBlock>(id, |_| {});
+        assert!(r.has_active());
+
+        r.remove(id);
+        assert!(!r.has_active());
+        // All effects for this node are gone
+    }
+
+    #[test]
+    fn multiple_effects_per_node() {
+        let mut r = Renderer::new(10);
+        let container = r.push(VStack);
+
+        // Build with lifecycle element — has mount + unmount
+        let mut els = Elements::new();
+        els.add(LifecycleEl::new("multi")).key("m");
+        r.rebuild(container, els);
+
+        let id = r.find_by_key(container, "m").unwrap();
+
+        // Also register a tick
+        r.register_tick::<LifecycleWidget>(id, Duration::from_millis(1), |state| {
+            state.push("ticked".to_string());
+        });
+
+        // All three effects (mount already fired, unmount waiting, tick active)
+        assert!(r.has_active()); // tick is active
+
+        // Tick should work
+        std::thread::sleep(Duration::from_millis(5));
+        r.tick();
+        assert!(r.state_mut::<LifecycleWidget>(id).contains(&"ticked".to_string()));
+
+        // Tombstone fires unmount and cleans everything
+        r.rebuild(container, Elements::new());
+        assert!(!r.has_active());
+        assert!(r.state_mut::<LifecycleWidget>(id).contains(&"unmounted:multi".to_string()));
     }
 }

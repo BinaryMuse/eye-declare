@@ -101,6 +101,24 @@ impl InlineRenderer {
         self.renderer.has_active()
     }
 
+    /// Register a mount handler for a node.
+    pub fn on_mount<C: Component>(
+        &mut self,
+        id: NodeId,
+        handler: impl Fn(&mut C::State) + Send + Sync + 'static,
+    ) {
+        self.renderer.on_mount::<C>(id, handler)
+    }
+
+    /// Register an unmount handler for a node.
+    pub fn on_unmount<C: Component>(
+        &mut self,
+        id: NodeId,
+        handler: impl Fn(&mut C::State) + Send + Sync + 'static,
+    ) {
+        self.renderer.on_unmount::<C>(id, handler)
+    }
+
     /// Set which component has focus for event routing.
     pub fn set_focus(&mut self, id: NodeId) {
         self.renderer.set_focus(id);
