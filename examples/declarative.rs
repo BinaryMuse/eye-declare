@@ -2,14 +2,14 @@
 //!
 //! This example shows how to use `Elements` and `rebuild` to describe
 //! the UI as a function of state, instead of imperative tree manipulation.
-//! With reconciliation, component state (like spinner animation frames)
-//! survives across rebuilds when elements are keyed.
+//! Spinners animate automatically via the tick registration system —
+//! no manual ticking needed.
 //!
 //! Run with: cargo run --example declarative
 
 use std::io::{self, Write};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use eye_declare::{Elements, InlineRenderer, MarkdownEl, SpinnerEl, TextBlockEl, VStack};
 use ratatui_core::style::{Color, Style};
@@ -46,12 +46,12 @@ fn chat_view(state: &AppState) -> Elements {
         els.add(MarkdownEl::new(msg)).key(format!("msg-{i}"));
     }
 
-    // Show thinking spinner if active (keyed for state preservation)
+    // Show thinking spinner if active (auto-animates via tick registration)
     if state.thinking {
         els.add(SpinnerEl::new("Thinking...")).key("thinking");
     }
 
-    // Show tool call spinner if active (keyed for state preservation)
+    // Show tool call spinner if active (auto-animates via tick registration)
     if let Some(ref tool) = state.tool_running {
         els.add(SpinnerEl::new(format!("Running {}...", tool))).key("tool");
     }
@@ -73,26 +73,14 @@ fn main() -> io::Result<()> {
     let mut r = InlineRenderer::new(width);
     let mut stdout = io::stdout();
 
-    // Create a container for the declarative view
     let container = r.push(VStack);
-
     let mut state = AppState::new();
 
-    // --- Phase 1: Start thinking ---
+    // --- Phase 1: Thinking ---
     state.thinking = true;
     r.rebuild(container, chat_view(&state));
-    flush(&mut r, &mut stdout)?;
-
-    // Animate the thinking spinner — find it by key, not index!
-    // The spinner's frame counter survives rebuilds thanks to reconciliation.
-    let start = Instant::now();
-    while start.elapsed() < Duration::from_millis(1500) {
-        if let Some(id) = r.find_by_key(container, "thinking") {
-            r.state_mut::<eye_declare::Spinner>(id).tick();
-        }
-        flush(&mut r, &mut stdout)?;
-        thread::sleep(Duration::from_millis(80));
-    }
+    // Spinner animates automatically — just tick and render
+    animate_while_active(&mut r, &mut stdout, Duration::from_millis(1500))?;
 
     // --- Phase 2: First response ---
     state.thinking = false;
@@ -122,17 +110,8 @@ fn main() -> io::Result<()> {
     // --- Phase 3: Tool call ---
     state.tool_running = Some("cargo clippy".to_string());
     r.rebuild(container, chat_view(&state));
-    flush(&mut r, &mut stdout)?;
-
-    // Animate tool spinner — find by key, frame survives rebuilds
-    let start = Instant::now();
-    while start.elapsed() < Duration::from_millis(2000) {
-        if let Some(id) = r.find_by_key(container, "tool") {
-            r.state_mut::<eye_declare::Spinner>(id).tick();
-        }
-        flush(&mut r, &mut stdout)?;
-        thread::sleep(Duration::from_millis(80));
-    }
+    // Spinner auto-animates
+    animate_while_active(&mut r, &mut stdout, Duration::from_millis(2000))?;
 
     // --- Phase 4: Tool complete, add follow-up ---
     state.tool_running = None;
@@ -158,6 +137,21 @@ fn flush(r: &mut InlineRenderer, stdout: &mut impl Write) -> io::Result<()> {
     if !output.is_empty() {
         stdout.write_all(&output)?;
         stdout.flush()?;
+    }
+    Ok(())
+}
+
+/// Tick and render while there are active animations, up to a max duration.
+fn animate_while_active(
+    r: &mut InlineRenderer,
+    stdout: &mut impl Write,
+    max_duration: Duration,
+) -> io::Result<()> {
+    let start = std::time::Instant::now();
+    while start.elapsed() < max_duration && r.has_active() {
+        r.tick();
+        flush(r, stdout)?;
+        thread::sleep(Duration::from_millis(50));
     }
     Ok(())
 }

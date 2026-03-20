@@ -1,4 +1,5 @@
 use std::collections::{HashMap, VecDeque};
+use std::time::{Duration, Instant};
 
 use ratatui_core::{
     buffer::Buffer,
@@ -8,7 +9,7 @@ use ratatui_core::{
 use crate::component::{Component, EventResult, Tracked, VStack};
 use crate::element::{ElementEntry, Elements};
 use crate::frame::Frame;
-use crate::node::{Node, NodeId};
+use crate::node::{Node, NodeId, TickRegistration, TypedTickHandler};
 
 /// Manages a tree of components and renders them into a Frame.
 ///
@@ -23,6 +24,8 @@ pub struct Renderer {
     /// After rendering, the absolute cursor position for the focused
     /// component (if it returns one from cursor_position).
     cursor_hint: Option<(u16, u16)>,
+    /// Registered periodic tick callbacks, keyed by NodeId.
+    ticks: HashMap<NodeId, TickRegistration>,
 }
 
 impl Renderer {
@@ -34,7 +37,7 @@ impl Renderer {
         nodes.push(Node::new(VStack));
         // Root starts clean since VStack has no visible content
         nodes[0].state.clear_dirty();
-        Self { nodes, root, width, focused: None, cursor_hint: None }
+        Self { nodes, root, width, focused: None, cursor_hint: None, ticks: HashMap::new() }
     }
 
     /// The root node's ID.
@@ -239,6 +242,70 @@ impl Renderer {
             .copied()
     }
 
+    /// Register a periodic tick handler for a node.
+    ///
+    /// The handler receives `&mut C::State` and is called by [`tick()`]
+    /// when the interval has elapsed. The `Tracked` wrapper marks state
+    /// dirty automatically when the handler fires.
+    ///
+    /// Only one tick per node. Re-registering replaces the previous one.
+    pub fn register_tick<C: Component>(
+        &mut self,
+        id: NodeId,
+        interval: Duration,
+        handler: impl Fn(&mut C::State) + Send + Sync + 'static,
+    ) {
+        self.ticks.insert(
+            id,
+            TickRegistration {
+                handler: Box::new(TypedTickHandler {
+                    handler: Box::new(handler),
+                }),
+                interval,
+                last_tick: Instant::now(),
+            },
+        );
+    }
+
+    /// Remove a tick registration for a node. No-op if none exists.
+    pub fn unregister_tick(&mut self, id: NodeId) {
+        self.ticks.remove(&id);
+    }
+
+    /// Advance all registered tick handlers based on elapsed wall clock time.
+    ///
+    /// Returns `true` if any handler fired (state was mutated, re-render
+    /// likely needed).
+    pub fn tick(&mut self) -> bool {
+        let now = Instant::now();
+        let due: Vec<NodeId> = self
+            .ticks
+            .iter()
+            .filter(|(_, reg)| now.duration_since(reg.last_tick) >= reg.interval)
+            .map(|(id, _)| *id)
+            .collect();
+
+        if due.is_empty() {
+            return false;
+        }
+
+        for id in due {
+            // Remove-call-reinsert to satisfy the borrow checker:
+            // we need &self.ticks (handler) and &mut self.nodes (state) simultaneously.
+            let mut reg = self.ticks.remove(&id).unwrap();
+            reg.last_tick = now;
+            reg.handler.call(self.nodes[id.0].state.as_any_mut());
+            self.ticks.insert(id, reg);
+        }
+
+        true
+    }
+
+    /// Whether there are any active tick registrations.
+    pub fn has_active(&self) -> bool {
+        !self.ticks.is_empty()
+    }
+
     /// Reconcile old children of `parent` against new element entries.
     ///
     /// Reuses existing nodes where possible (matching by key or by
@@ -352,6 +419,7 @@ impl Renderer {
     /// Tombstone a node and all its descendants without touching the
     /// parent's children list (caller is responsible for that).
     fn tombstone_subtree(&mut self, id: NodeId) {
+        self.ticks.remove(&id);
         let children = std::mem::take(&mut self.nodes[id.0].children);
         for child_id in children {
             self.tombstone_subtree(child_id);
@@ -1479,5 +1547,160 @@ mod tests {
         // Rebuild with empty
         r.rebuild(container, Elements::new());
         assert_eq!(r.children(container).len(), 0);
+    }
+
+    // --- Tick registration tests ---
+
+    use std::time::Duration;
+
+    #[test]
+    fn register_tick_fires_handler() {
+        let mut r = Renderer::new(10);
+        let id = r.push(TextBlock);
+        r.state_mut::<TextBlock>(id).push("hello".to_string());
+
+        // Register a tick that appends to the text
+        r.register_tick::<TextBlock>(id, Duration::from_millis(1), |state| {
+            state.push("ticked".to_string());
+        });
+
+        assert!(r.has_active());
+
+        // Sleep to ensure interval elapses
+        std::thread::sleep(Duration::from_millis(5));
+
+        let fired = r.tick();
+        assert!(fired);
+
+        // State should have been mutated by the handler
+        assert_eq!(r.state_mut::<TextBlock>(id).len(), 2);
+    }
+
+    #[test]
+    fn tick_respects_interval() {
+        let mut r = Renderer::new(10);
+        let id = r.push(TextBlock);
+        r.state_mut::<TextBlock>(id).push("hello".to_string());
+
+        // Register with a long interval
+        r.register_tick::<TextBlock>(id, Duration::from_secs(60), |state| {
+            state.push("ticked".to_string());
+        });
+
+        // Immediately tick — should not fire
+        let fired = r.tick();
+        assert!(!fired);
+        assert_eq!(r.state_mut::<TextBlock>(id).len(), 1);
+    }
+
+    #[test]
+    fn unregister_tick_prevents_firing() {
+        let mut r = Renderer::new(10);
+        let id = r.push(TextBlock);
+        r.state_mut::<TextBlock>(id).push("hello".to_string());
+
+        r.register_tick::<TextBlock>(id, Duration::from_millis(1), |state| {
+            state.push("ticked".to_string());
+        });
+        assert!(r.has_active());
+
+        r.unregister_tick(id);
+        assert!(!r.has_active());
+
+        std::thread::sleep(Duration::from_millis(5));
+        let fired = r.tick();
+        assert!(!fired);
+    }
+
+    #[test]
+    fn tombstone_cleans_up_ticks() {
+        let mut r = Renderer::new(10);
+        let id = r.push(TextBlock);
+        r.state_mut::<TextBlock>(id).push("hello".to_string());
+
+        r.register_tick::<TextBlock>(id, Duration::from_millis(1), |_| {});
+        assert!(r.has_active());
+
+        r.remove(id);
+        assert!(!r.has_active());
+    }
+
+    #[test]
+    fn rebuild_cleans_up_removed_ticks() {
+        let mut r = Renderer::new(10);
+        let container = r.push(VStack);
+
+        // Build with a ticked element
+        let mut els = Elements::new();
+        els.add(CounterEl::new("item")).key("x");
+        r.rebuild(container, els);
+
+        let id = r.find_by_key(container, "x").unwrap();
+        r.register_tick::<CounterWidget>(id, Duration::from_millis(1), |state| {
+            state.1 += 1;
+        });
+        assert!(r.has_active());
+
+        // Rebuild without the keyed element
+        r.rebuild(container, Elements::new());
+        assert!(!r.has_active());
+    }
+
+    #[test]
+    fn has_active_reflects_registrations() {
+        let mut r = Renderer::new(10);
+        assert!(!r.has_active());
+
+        let id = r.push(TextBlock);
+        r.state_mut::<TextBlock>(id).push("hello".to_string());
+        assert!(!r.has_active());
+
+        r.register_tick::<TextBlock>(id, Duration::from_millis(80), |_| {});
+        assert!(r.has_active());
+
+        r.unregister_tick(id);
+        assert!(!r.has_active());
+    }
+
+    #[test]
+    fn spinner_el_build_auto_registers_tick() {
+        let mut r = Renderer::new(10);
+        let container = r.push(VStack);
+
+        let mut els = Elements::new();
+        els.add(crate::elements::SpinnerEl::new("Loading..."));
+        r.rebuild(container, els);
+
+        assert!(r.has_active());
+    }
+
+    #[test]
+    fn spinner_el_done_build_no_tick() {
+        let mut r = Renderer::new(10);
+        let container = r.push(VStack);
+
+        let mut els = Elements::new();
+        els.add(crate::elements::SpinnerEl::new("Done").done("Completed"));
+        r.rebuild(container, els);
+
+        assert!(!r.has_active());
+    }
+
+    #[test]
+    fn spinner_el_update_to_done_unregisters() {
+        let mut r = Renderer::new(10);
+        let container = r.push(VStack);
+
+        // Build active spinner
+        let mut els = Elements::new();
+        els.add(crate::elements::SpinnerEl::new("Loading...")).key("s");
+        r.rebuild(container, els);
+        assert!(r.has_active());
+
+        // Rebuild as done
+        let mut els = Elements::new();
+        els.add(crate::elements::SpinnerEl::new("Done").done("Completed")).key("s");
+        r.rebuild(container, els);
+        assert!(!r.has_active());
     }
 }

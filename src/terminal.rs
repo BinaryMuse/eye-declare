@@ -8,6 +8,7 @@ use crate::element::Elements;
 use crate::inline::InlineRenderer;
 use crate::node::NodeId;
 
+
 /// Convenience wrapper that runs an eye_declare UI with a crossterm event loop.
 ///
 /// Handles terminal raw mode, event polling, rendering, resize, and cleanup.
@@ -85,6 +86,31 @@ impl Terminal {
         self.renderer.find_by_key(parent, key)
     }
 
+    /// Register a periodic tick handler for a node.
+    pub fn register_tick<C: Component>(
+        &mut self,
+        id: NodeId,
+        interval: Duration,
+        handler: impl Fn(&mut C::State) + Send + Sync + 'static,
+    ) {
+        self.renderer.register_tick::<C>(id, interval, handler)
+    }
+
+    /// Remove a tick registration for a node.
+    pub fn unregister_tick(&mut self, id: NodeId) {
+        self.renderer.unregister_tick(id)
+    }
+
+    /// Advance all registered tick handlers. Returns true if any fired.
+    pub fn tick(&mut self) -> bool {
+        self.renderer.tick()
+    }
+
+    /// Whether there are any active tick registrations.
+    pub fn has_active(&self) -> bool {
+        self.renderer.has_active()
+    }
+
     pub fn set_focus(&mut self, id: NodeId) {
         self.renderer.set_focus(id)
     }
@@ -151,6 +177,14 @@ impl Terminal {
 
         loop {
             if !event::poll(Duration::from_millis(50))? {
+                // No event — tick active components and re-render if needed
+                if self.renderer.tick() {
+                    let output = self.renderer.render();
+                    if !output.is_empty() {
+                        stdout.write_all(&output)?;
+                        stdout.flush()?;
+                    }
+                }
                 continue;
             }
 
@@ -185,6 +219,9 @@ impl Terminal {
 
             // Deliver to framework (Tab cycling, focus routing)
             self.renderer.handle_event(&evt);
+
+            // Tick active components (time may have elapsed)
+            self.renderer.tick();
 
             // Render
             let output = self.renderer.render();

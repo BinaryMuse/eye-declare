@@ -1,4 +1,5 @@
 use std::any::{Any, TypeId};
+use std::time::{Duration, Instant};
 
 use ratatui_core::{buffer::Buffer, layout::Rect};
 
@@ -96,6 +97,34 @@ impl<S: Send + Sync + 'static> AnyTrackedState for Tracked<S> {
         use std::ops::Deref;
         self.deref() as &dyn Any
     }
+}
+
+/// Type-erased tick handler for periodic callbacks.
+pub(crate) trait AnyTickHandler: Send + Sync {
+    fn call(&self, tracked_state: &mut dyn Any);
+}
+
+/// Typed wrapper that captures a closure operating on `S` and downcasts
+/// the type-erased `Tracked<S>` at call time. `DerefMut` on `Tracked`
+/// automatically marks state dirty when the handler fires.
+pub(crate) struct TypedTickHandler<S: 'static> {
+    pub(crate) handler: Box<dyn Fn(&mut S) + Send + Sync>,
+}
+
+impl<S: Send + Sync + 'static> AnyTickHandler for TypedTickHandler<S> {
+    fn call(&self, tracked_state: &mut dyn Any) {
+        if let Some(tracked) = tracked_state.downcast_mut::<Tracked<S>>() {
+            use std::ops::DerefMut;
+            (self.handler)(tracked.deref_mut());
+        }
+    }
+}
+
+/// A registered periodic callback for a node.
+pub(crate) struct TickRegistration {
+    pub handler: Box<dyn AnyTickHandler>,
+    pub interval: Duration,
+    pub last_tick: Instant,
 }
 
 /// A node in the component tree. Framework-internal.

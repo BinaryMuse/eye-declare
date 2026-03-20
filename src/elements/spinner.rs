@@ -1,9 +1,15 @@
+use std::time::Duration;
+
 use crate::components::spinner::{Spinner, SpinnerState};
 use crate::element::Element;
 use crate::node::NodeId;
 use crate::renderer::Renderer;
 
 /// Element builder for a [`Spinner`] component.
+///
+/// Spinners automatically animate when built — no manual ticking
+/// needed. The framework calls the registered tick handler at 80ms
+/// intervals. When the spinner is done, the tick is unregistered.
 ///
 /// ```ignore
 /// els.add(SpinnerEl::new("Thinking..."));
@@ -39,6 +45,10 @@ impl Element for SpinnerEl {
         **state = SpinnerState::new(self.label);
         if self.done {
             state.complete(self.done_label);
+        } else {
+            renderer.register_tick::<Spinner>(id, Duration::from_millis(80), |state| {
+                state.tick();
+            });
         }
         id
     }
@@ -51,5 +61,14 @@ impl Element for SpinnerEl {
         state.done_label = self.done_label;
         // Local state (component-internal): frame, spinner_style,
         // label_style, done_style are intentionally NOT reset here.
+
+        // Manage tick registration based on done state
+        if self.done {
+            renderer.unregister_tick(node_id);
+        } else {
+            renderer.register_tick::<Spinner>(node_id, Duration::from_millis(80), |state| {
+                state.tick();
+            });
+        }
     }
 }

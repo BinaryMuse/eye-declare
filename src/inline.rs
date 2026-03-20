@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use crate::component::{Component, EventResult, Tracked};
 use crate::element::Elements;
 use crate::escape::CursorState;
@@ -72,6 +74,31 @@ impl InlineRenderer {
     /// Find a direct child of `parent` by its key.
     pub fn find_by_key(&self, parent: NodeId, key: &str) -> Option<NodeId> {
         self.renderer.find_by_key(parent, key)
+    }
+
+    /// Register a periodic tick handler for a node.
+    pub fn register_tick<C: Component>(
+        &mut self,
+        id: NodeId,
+        interval: Duration,
+        handler: impl Fn(&mut C::State) + Send + Sync + 'static,
+    ) {
+        self.renderer.register_tick::<C>(id, interval, handler)
+    }
+
+    /// Remove a tick registration for a node.
+    pub fn unregister_tick(&mut self, id: NodeId) {
+        self.renderer.unregister_tick(id)
+    }
+
+    /// Advance all registered tick handlers. Returns true if any fired.
+    pub fn tick(&mut self) -> bool {
+        self.renderer.tick()
+    }
+
+    /// Whether there are any active tick registrations.
+    pub fn has_active(&self) -> bool {
+        self.renderer.has_active()
     }
 
     /// Set which component has focus for event routing.
