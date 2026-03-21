@@ -1,6 +1,6 @@
 use std::any::TypeId;
 
-use crate::node::NodeId;
+use crate::node::{NodeId, WidthConstraint};
 use crate::renderer::Renderer;
 
 /// Describes a component to create in the tree.
@@ -38,6 +38,7 @@ pub(crate) struct ElementEntry {
     pub(crate) children: Option<Elements>,
     pub(crate) key: Option<String>,
     pub(crate) type_id: TypeId,
+    pub(crate) width_constraint: WidthConstraint,
 }
 
 /// A list of element descriptions for declarative tree building.
@@ -76,6 +77,7 @@ impl Elements {
             children: None,
             key: None,
             type_id,
+            width_constraint: WidthConstraint::default(),
         });
         ElementHandle {
             entry: self.items.last_mut().unwrap(),
@@ -97,6 +99,7 @@ impl Elements {
             children: Some(children),
             key: None,
             type_id,
+            width_constraint: WidthConstraint::default(),
         });
         ElementHandle {
             entry: self.items.last_mut().unwrap(),
@@ -108,6 +111,14 @@ impl Elements {
     /// Shorthand for `add_with_children(VStackEl, children)`.
     pub fn group(&mut self, children: Elements) -> ElementHandle<'_> {
         self.add_with_children(crate::elements::VStackEl, children)
+    }
+
+    /// Add an HStack wrapper around the given children.
+    ///
+    /// Shorthand for `add_with_children(HStackEl, children)`.
+    /// Children declare their width with `.width(WidthConstraint::Fixed(n))`.
+    pub fn hstack(&mut self, children: Elements) -> ElementHandle<'_> {
+        self.add_with_children(crate::elements::HStackEl, children)
     }
 
     /// Consume the Elements and return the entries for reconciliation.
@@ -135,6 +146,16 @@ impl<'a> ElementHandle<'a> {
     /// elements are matched by position and type.
     pub fn key(self, key: impl Into<String>) -> Self {
         self.entry.key = Some(key.into());
+        self
+    }
+
+    /// Set the width constraint for this element within a horizontal container.
+    ///
+    /// Only meaningful when the element is a child of an HStack.
+    /// `Fixed(n)` reserves exactly n columns. `Fill` (default) takes
+    /// remaining space, split equally among Fill siblings.
+    pub fn width(self, constraint: WidthConstraint) -> Self {
+        self.entry.width_constraint = constraint;
         self
     }
 }

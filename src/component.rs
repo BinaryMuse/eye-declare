@@ -124,6 +124,26 @@ impl Component for VStack {
     fn initial_state(&self) -> () {}
 }
 
+/// A no-op container component for horizontal layout.
+///
+/// HStack renders nothing itself — children are laid out
+/// left-to-right with widths determined by their
+/// [`WidthConstraint`](crate::node::WidthConstraint).
+/// The layout direction is set on the Node by the element builder.
+pub struct HStack;
+
+impl Component for HStack {
+    type State = ();
+
+    fn render(&self, _area: Rect, _buf: &mut Buffer, _state: &()) {}
+
+    fn desired_height(&self, _width: u16, _state: &()) -> u16 {
+        0
+    }
+
+    fn initial_state(&self) -> () {}
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -9,7 +9,7 @@ use ratatui_core::{
 use crate::component::{Component, EventResult, Tracked, VStack};
 use crate::element::{ElementEntry, Elements};
 use crate::frame::Frame;
-use crate::node::{Effect, EffectKind, Node, NodeId, TypedEffectHandler};
+use crate::node::{Effect, EffectKind, Layout, Node, NodeId, TypedEffectHandler, WidthConstraint};
 
 /// Manages a tree of components and renders them into a Frame.
 ///
@@ -78,6 +78,11 @@ impl Renderer {
     /// and are not re-rendered on subsequent frames.
     pub fn freeze(&mut self, id: NodeId) {
         self.nodes[id.0].frozen = true;
+    }
+
+    /// Set the layout direction for a container node.
+    pub fn set_layout(&mut self, id: NodeId, layout: Layout) {
+        self.nodes[id.0].layout = layout;
     }
 
     /// List the children of a node.
@@ -458,6 +463,7 @@ impl Renderer {
                 // REUSE: update props, preserve local state
                 entry.element.update(self, old_id);
                 self.nodes[old_id.0].parent = Some(parent);
+                self.nodes[old_id.0].width_constraint = entry.width_constraint;
                 // Guarantee re-render after props update
                 self.nodes[old_id.0].force_dirty = true;
 
@@ -472,6 +478,7 @@ impl Renderer {
                 let id = entry.element.build(self, parent);
                 self.nodes[id.0].element_type_id = Some(entry.type_id);
                 self.nodes[id.0].key = entry.key;
+                self.nodes[id.0].width_constraint = entry.width_constraint;
                 self.fire_mount(id);
 
                 if let Some(children) = entry.children {
@@ -504,6 +511,7 @@ impl Renderer {
             let node_id = entry.element.build(self, parent);
             self.nodes[node_id.0].element_type_id = Some(entry.type_id);
             self.nodes[node_id.0].key = entry.key;
+            self.nodes[node_id.0].width_constraint = entry.width_constraint;
             self.fire_mount(node_id);
             if let Some(children) = entry.children {
                 self.build_elements(node_id, children);
@@ -604,11 +612,30 @@ impl Renderer {
         }
 
         if node.is_container() {
-            // Container: height = sum of children
-            node.children
-                .iter()
-                .map(|&child| self.measure_height(child, width))
-                .sum()
+            match node.layout {
+                Layout::Vertical => {
+                    // Height = sum of children heights, each at full width
+                    node.children
+                        .iter()
+                        .map(|&child| self.measure_height(child, width))
+                        .sum()
+                }
+                Layout::Horizontal => {
+                    // Allocate widths, then height = max of children at allocated widths
+                    let constraints: Vec<WidthConstraint> = node
+                        .children
+                        .iter()
+                        .map(|&cid| self.nodes[cid.0].width_constraint)
+                        .collect();
+                    let widths = allocate_widths(&constraints, width);
+                    node.children
+                        .iter()
+                        .zip(widths.iter())
+                        .map(|(&child, &w)| self.measure_height(child, w))
+                        .max()
+                        .unwrap_or(0)
+                }
+            }
         } else {
             // Leaf: ask the component
             let state = node.state.inner_as_any();
@@ -642,17 +669,40 @@ impl Renderer {
             let state = self.nodes[id.0].state.inner_as_any();
             self.nodes[id.0].component.render_erased(area, buffer, state);
 
-            // Layout and render children vertically
             let children: Vec<NodeId> = self.nodes[id.0].children.clone();
-            let mut y_offset = area.y;
-            for child_id in children {
-                let child_height = self.measure_height(child_id, area.width);
-                if child_height == 0 {
-                    continue;
+            let layout = self.nodes[id.0].layout;
+
+            match layout {
+                Layout::Vertical => {
+                    let mut y_offset = area.y;
+                    for child_id in &children {
+                        let child_height = self.measure_height(*child_id, area.width);
+                        if child_height == 0 {
+                            continue;
+                        }
+                        let child_area =
+                            Rect::new(area.x, y_offset, area.width, child_height);
+                        self.render_node(*child_id, child_area, buffer);
+                        y_offset = y_offset.saturating_add(child_height);
+                    }
                 }
-                let child_area = Rect::new(area.x, y_offset, area.width, child_height);
-                self.render_node(child_id, child_area, buffer);
-                y_offset = y_offset.saturating_add(child_height);
+                Layout::Horizontal => {
+                    let constraints: Vec<WidthConstraint> = children
+                        .iter()
+                        .map(|&cid| self.nodes[cid.0].width_constraint)
+                        .collect();
+                    let widths = allocate_widths(&constraints, area.width);
+                    let mut x_offset = area.x;
+                    for (child_id, &child_width) in children.iter().zip(widths.iter()) {
+                        if child_width == 0 {
+                            continue;
+                        }
+                        let child_area =
+                            Rect::new(x_offset, area.y, child_width, area.height);
+                        self.render_node(*child_id, child_area, buffer);
+                        x_offset = x_offset.saturating_add(child_width);
+                    }
+                }
             }
 
             // Cache and clean
@@ -676,6 +726,45 @@ impl Renderer {
             self.nodes[id.0].force_dirty = false;
         }
     }
+}
+
+/// Allocate widths among children based on their constraints.
+///
+/// Fixed children get their requested width (clamped to available).
+/// Fill children split the remaining space equally, with remainder
+/// distributed to the first Fill children.
+fn allocate_widths(constraints: &[WidthConstraint], total: u16) -> Vec<u16> {
+    let fixed_sum: u16 = constraints
+        .iter()
+        .filter_map(|c| match c {
+            WidthConstraint::Fixed(w) => Some(*w),
+            _ => None,
+        })
+        .sum();
+    let fill_count = constraints
+        .iter()
+        .filter(|c| matches!(c, WidthConstraint::Fill))
+        .count() as u16;
+
+    let remaining = total.saturating_sub(fixed_sum);
+    let per_fill = if fill_count > 0 { remaining / fill_count } else { 0 };
+    let mut remainder = if fill_count > 0 { remaining % fill_count } else { 0 };
+
+    constraints
+        .iter()
+        .map(|c| match c {
+            WidthConstraint::Fixed(w) => (*w).min(total),
+            WidthConstraint::Fill => {
+                let extra = if remainder > 0 {
+                    remainder -= 1;
+                    1
+                } else {
+                    0
+                };
+                per_fill + extra
+            }
+        })
+        .collect()
 }
 
 /// Copy cells from a source buffer into a destination buffer at the given area.
@@ -2005,5 +2094,180 @@ mod tests {
         r.rebuild(container, Elements::new());
         assert!(!r.has_active());
         assert!(r.state_mut::<LifecycleWidget>(id).contains(&"unmounted:multi".to_string()));
+    }
+
+    // --- HStack / horizontal layout tests ---
+
+    use crate::node::WidthConstraint;
+
+    #[test]
+    fn allocate_widths_all_fill() {
+        let constraints = vec![WidthConstraint::Fill, WidthConstraint::Fill];
+        let widths = super::allocate_widths(&constraints, 80);
+        assert_eq!(widths, vec![40, 40]);
+    }
+
+    #[test]
+    fn allocate_widths_fill_with_remainder() {
+        let constraints = vec![WidthConstraint::Fill, WidthConstraint::Fill, WidthConstraint::Fill];
+        let widths = super::allocate_widths(&constraints, 80);
+        // 80 / 3 = 26 remainder 2 → first two get 27, last gets 26
+        assert_eq!(widths, vec![27, 27, 26]);
+        assert_eq!(widths.iter().sum::<u16>(), 80);
+    }
+
+    #[test]
+    fn allocate_widths_fixed_plus_fill() {
+        let constraints = vec![
+            WidthConstraint::Fixed(2),
+            WidthConstraint::Fill,
+        ];
+        let widths = super::allocate_widths(&constraints, 80);
+        assert_eq!(widths, vec![2, 78]);
+    }
+
+    #[test]
+    fn allocate_widths_fixed_exceeds_total() {
+        let constraints = vec![
+            WidthConstraint::Fixed(50),
+            WidthConstraint::Fixed(50),
+            WidthConstraint::Fill,
+        ];
+        let widths = super::allocate_widths(&constraints, 80);
+        // Fixed: 50 + 50 = 100 > 80. Each fixed clamped to 80.
+        // Fill gets 0 (saturating_sub).
+        assert_eq!(widths[2], 0);
+    }
+
+    #[test]
+    fn allocate_widths_single_fill() {
+        let constraints = vec![WidthConstraint::Fill];
+        let widths = super::allocate_widths(&constraints, 80);
+        assert_eq!(widths, vec![80]);
+    }
+
+    #[test]
+    fn hstack_measure_height_uses_max() {
+        let mut r = Renderer::new(20);
+        let container = r.push(VStack);
+
+        // HStack with two children of different heights
+        let hstack = r.append_child(container, crate::component::HStack);
+        r.set_layout(hstack, crate::node::Layout::Horizontal);
+
+        let child1 = r.append_child(hstack, TextBlock);
+        r.state_mut::<TextBlock>(child1).push("line1".to_string());
+        r.state_mut::<TextBlock>(child1).push("line2".to_string());
+        // child1: 2 lines tall
+
+        let child2 = r.append_child(hstack, TextBlock);
+        r.state_mut::<TextBlock>(child2).push("one".to_string());
+        // child2: 1 line tall
+
+        let frame = r.render();
+        // HStack height = max(2, 1) = 2
+        assert_eq!(frame.area().height, 2);
+    }
+
+    #[test]
+    fn hstack_renders_side_by_side() {
+        let mut r = Renderer::new(20);
+
+        // Use declarative API for HStack
+        let container = r.push(VStack);
+
+        let mut row = Elements::new();
+        row.add(TestTextEl::new(">")).width(WidthConstraint::Fixed(2));
+        row.add(TestTextEl::new("hello"));
+
+        let mut els = Elements::new();
+        els.hstack(row);
+        r.rebuild(container, els);
+
+        let frame = r.render();
+        let buf = frame.buffer();
+
+        // ">" at x=0
+        assert_eq!(buf[(0, 0)].symbol(), ">");
+        // "hello" starts at x=2
+        assert_eq!(buf[(2, 0)].symbol(), "h");
+        assert_eq!(buf[(3, 0)].symbol(), "e");
+    }
+
+    #[test]
+    fn hstack_two_fill_columns() {
+        let mut r = Renderer::new(20);
+        let container = r.push(VStack);
+
+        let mut row = Elements::new();
+        row.add(TestTextEl::new("left"));
+        row.add(TestTextEl::new("right"));
+
+        let mut els = Elements::new();
+        els.hstack(row);
+        r.rebuild(container, els);
+
+        let frame = r.render();
+        let buf = frame.buffer();
+
+        // "left" at x=0 (first 10 cols)
+        assert_eq!(buf[(0, 0)].symbol(), "l");
+        // "right" at x=10 (second 10 cols)
+        assert_eq!(buf[(10, 0)].symbol(), "r");
+    }
+
+    #[test]
+    fn hstack_nested_in_vstack() {
+        let mut r = Renderer::new(20);
+        let container = r.push(VStack);
+
+        let mut els = Elements::new();
+        els.add(TestTextEl::new("above"));
+
+        let mut row = Elements::new();
+        row.add(TestTextEl::new("$")).width(WidthConstraint::Fixed(2));
+        row.add(TestTextEl::new("cmd"));
+        els.hstack(row);
+
+        els.add(TestTextEl::new("below"));
+        r.rebuild(container, els);
+
+        let frame = r.render();
+        assert_eq!(frame.area().height, 3);
+
+        let buf = frame.buffer();
+        assert_eq!(buf[(0, 0)].symbol(), "a"); // "above"
+        assert_eq!(buf[(0, 1)].symbol(), "$"); // symbol column
+        assert_eq!(buf[(2, 1)].symbol(), "c"); // "cmd" at x=2
+        assert_eq!(buf[(0, 2)].symbol(), "b"); // "below"
+    }
+
+    #[test]
+    fn hstack_reconciliation_preserves_width() {
+        let mut r = Renderer::new(20);
+        let container = r.push(VStack);
+
+        // First build
+        let mut row = Elements::new();
+        row.add(TestTextEl::new(">")).width(WidthConstraint::Fixed(2));
+        row.add(TestTextEl::new("v1"));
+        let mut els = Elements::new();
+        els.hstack(row).key("row");
+        r.rebuild(container, els);
+
+        let frame1 = r.render();
+        assert_eq!(frame1.buffer()[(2, 0)].symbol(), "v"); // "v1" at x=2
+
+        // Rebuild — content changes but layout preserved
+        let mut row = Elements::new();
+        row.add(TestTextEl::new("$")).width(WidthConstraint::Fixed(2));
+        row.add(TestTextEl::new("v2"));
+        let mut els = Elements::new();
+        els.hstack(row).key("row");
+        r.rebuild(container, els);
+
+        let frame2 = r.render();
+        assert_eq!(frame2.buffer()[(0, 0)].symbol(), "$");
+        assert_eq!(frame2.buffer()[(2, 0)].symbol(), "v"); // "v2" at x=2
     }
 }

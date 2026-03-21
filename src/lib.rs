@@ -11,15 +11,15 @@ pub mod terminal;
 pub mod wrap;
 
 // Re-export key types at the crate root for convenience
-pub use component::{Component, EventResult, Tracked, VStack};
+pub use component::{Component, EventResult, HStack, Tracked, VStack};
 pub use components::markdown::{Markdown, MarkdownState};
 pub use components::spinner::{Spinner, SpinnerState};
 pub use components::text::{TextBlock, TextState};
 pub use element::{Element, ElementHandle, Elements};
-pub use elements::{MarkdownEl, SpinnerEl, TextBlockEl, VStackEl};
+pub use elements::{HStackEl, MarkdownEl, SpinnerEl, TextBlockEl, VStackEl};
 pub use escape::CursorState;
 pub use frame::{Diff, Frame};
 pub use inline::InlineRenderer;
-pub use node::NodeId;
+pub use node::{Layout, NodeId, WidthConstraint};
 pub use renderer::Renderer;
 pub use terminal::Terminal;

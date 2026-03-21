@@ -9,6 +9,26 @@ use crate::component::{Component, Tracked};
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct NodeId(pub(crate) usize);
 
+/// Layout direction for a container node.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Layout {
+    /// Children stack top-to-bottom, each getting full parent width.
+    #[default]
+    Vertical,
+    /// Children lay left-to-right, width allocated per constraints.
+    Horizontal,
+}
+
+/// Width constraint for a child within a horizontal container.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum WidthConstraint {
+    /// Exact width in columns.
+    Fixed(u16),
+    /// Take remaining space (split equally among Fill children).
+    #[default]
+    Fill,
+}
+
 /// Type-erased component operations.
 pub(crate) trait AnyComponent: Send + Sync {
     fn render_erased(&self, area: Rect, buf: &mut Buffer, state: &dyn Any);
@@ -157,6 +177,10 @@ pub(crate) struct Node {
     pub element_type_id: Option<TypeId>,
     /// Optional key for stable identity across rebuilds.
     pub key: Option<String>,
+    /// Layout direction for this container. Set by element builders.
+    pub layout: Layout,
+    /// Width constraint for this node within a horizontal parent.
+    pub width_constraint: WidthConstraint,
 }
 
 impl Node {
@@ -174,6 +198,8 @@ impl Node {
             layout_rect: None,
             element_type_id: None,
             key: None,
+            layout: Layout::default(),
+            width_constraint: WidthConstraint::default(),
         }
     }
 
