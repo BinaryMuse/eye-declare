@@ -612,22 +612,23 @@ impl Renderer {
         }
 
         if node.is_container() {
-            match node.layout {
+            let insets = node.component.content_inset_erased(node.state.inner_as_any());
+            let inner_width = width.saturating_sub(insets.horizontal());
+
+            let children_height = match node.layout {
                 Layout::Vertical => {
-                    // Height = sum of children heights, each at full width
                     node.children
                         .iter()
-                        .map(|&child| self.measure_height(child, width))
+                        .map(|&child| self.measure_height(child, inner_width))
                         .sum()
                 }
                 Layout::Horizontal => {
-                    // Allocate widths, then height = max of children at allocated widths
                     let constraints: Vec<WidthConstraint> = node
                         .children
                         .iter()
                         .map(|&cid| self.nodes[cid.0].width_constraint)
                         .collect();
-                    let widths = allocate_widths(&constraints, width);
+                    let widths = allocate_widths(&constraints, inner_width);
                     node.children
                         .iter()
                         .zip(widths.iter())
@@ -635,7 +636,9 @@ impl Renderer {
                         .max()
                         .unwrap_or(0)
                 }
-            }
+            };
+
+            children_height + insets.vertical()
         } else {
             // Leaf: ask the component
             let state = node.state.inner_as_any();
@@ -665,23 +668,34 @@ impl Renderer {
         }
 
         if is_container {
-            // Render the container's own component first (background/border)
+            // Render the container's own component first (background/border/chrome)
             let state = self.nodes[id.0].state.inner_as_any();
             self.nodes[id.0].component.render_erased(area, buffer, state);
+
+            // Compute inner area for children using content insets
+            let insets = self.nodes[id.0]
+                .component
+                .content_inset_erased(self.nodes[id.0].state.inner_as_any());
+            let inner = Rect::new(
+                area.x.saturating_add(insets.left),
+                area.y.saturating_add(insets.top),
+                area.width.saturating_sub(insets.horizontal()),
+                area.height.saturating_sub(insets.vertical()),
+            );
 
             let children: Vec<NodeId> = self.nodes[id.0].children.clone();
             let layout = self.nodes[id.0].layout;
 
             match layout {
                 Layout::Vertical => {
-                    let mut y_offset = area.y;
+                    let mut y_offset = inner.y;
                     for child_id in &children {
-                        let child_height = self.measure_height(*child_id, area.width);
+                        let child_height = self.measure_height(*child_id, inner.width);
                         if child_height == 0 {
                             continue;
                         }
                         let child_area =
-                            Rect::new(area.x, y_offset, area.width, child_height);
+                            Rect::new(inner.x, y_offset, inner.width, child_height);
                         self.render_node(*child_id, child_area, buffer);
                         y_offset = y_offset.saturating_add(child_height);
                     }
@@ -691,14 +705,14 @@ impl Renderer {
                         .iter()
                         .map(|&cid| self.nodes[cid.0].width_constraint)
                         .collect();
-                    let widths = allocate_widths(&constraints, area.width);
-                    let mut x_offset = area.x;
+                    let widths = allocate_widths(&constraints, inner.width);
+                    let mut x_offset = inner.x;
                     for (child_id, &child_width) in children.iter().zip(widths.iter()) {
                         if child_width == 0 {
                             continue;
                         }
                         let child_area =
-                            Rect::new(x_offset, area.y, child_width, area.height);
+                            Rect::new(x_offset, inner.y, child_width, inner.height);
                         self.render_node(*child_id, child_area, buffer);
                         x_offset = x_offset.saturating_add(child_width);
                     }
@@ -2269,5 +2283,163 @@ mod tests {
         let frame2 = r.render();
         assert_eq!(frame2.buffer()[(0, 0)].symbol(), "$");
         assert_eq!(frame2.buffer()[(2, 0)].symbol(), "v"); // "v2" at x=2
+    }
+
+    // --- Content inset tests ---
+
+    use crate::insets::Insets;
+
+    /// A container component with configurable insets.
+    struct PaddedBox;
+
+    impl Component for PaddedBox {
+        type State = Insets;
+
+        fn render(&self, area: Rect, buf: &mut Buffer, _state: &Self::State) {
+            // Draw a border character at corners to verify chrome rendering
+            if area.width > 0 && area.height > 0 {
+                buf[(area.x, area.y)].set_symbol("+");
+                if area.width > 1 {
+                    buf[(area.x + area.width - 1, area.y)].set_symbol("+");
+                }
+                if area.height > 1 {
+                    buf[(area.x, area.y + area.height - 1)].set_symbol("+");
+                    if area.width > 1 {
+                        buf[(area.x + area.width - 1, area.y + area.height - 1)]
+                            .set_symbol("+");
+                    }
+                }
+            }
+        }
+
+        fn desired_height(&self, _width: u16, _state: &Self::State) -> u16 {
+            0
+        }
+
+        fn content_inset(&self, state: &Self::State) -> Insets {
+            *state
+        }
+
+        fn initial_state(&self) -> Insets {
+            Insets::ZERO
+        }
+    }
+
+    #[test]
+    fn zero_insets_children_get_full_area() {
+        let mut r = Renderer::new(10);
+        let container = r.push(VStack);
+
+        // PaddedBox with zero insets — children should get full width
+        let padded = r.append_child(container, PaddedBox);
+        let child = r.append_child(padded, TextBlock);
+        r.state_mut::<TextBlock>(child).push("hello".to_string());
+
+        let frame = r.render();
+        assert_eq!(frame.area().height, 1);
+        assert_eq!(frame.buffer()[(0, 0)].symbol(), "h"); // child at x=0
+    }
+
+    #[test]
+    fn uniform_insets_shrink_child_area() {
+        let mut r = Renderer::new(20);
+        let container = r.push(VStack);
+
+        // PaddedBox with 1-cell insets on all sides
+        let padded = r.append_child(container, PaddedBox);
+        **r.state_mut::<PaddedBox>(padded) = Insets::all(1);
+
+        let child = r.append_child(padded, TextBlock);
+        r.state_mut::<TextBlock>(child).push("hello".to_string());
+
+        let frame = r.render();
+        // Height: 1 (top inset) + 1 (child) + 1 (bottom inset) = 3
+        assert_eq!(frame.area().height, 3);
+
+        let buf = frame.buffer();
+        // Chrome: corner at (0,0)
+        assert_eq!(buf[(0, 0)].symbol(), "+");
+        // Child "hello" at (1, 1) — offset by left and top insets
+        assert_eq!(buf[(1, 1)].symbol(), "h");
+        assert_eq!(buf[(2, 1)].symbol(), "e");
+    }
+
+    #[test]
+    fn insets_reduce_inner_width() {
+        let mut r = Renderer::new(20);
+        let container = r.push(VStack);
+
+        // PaddedBox with 3-cell left, 2-cell right insets
+        let padded = r.append_child(container, PaddedBox);
+        **r.state_mut::<PaddedBox>(padded) = Insets::new().left(3).right(2);
+
+        let child = r.append_child(padded, TextBlock);
+        r.state_mut::<TextBlock>(child).push("hello".to_string());
+
+        let frame = r.render();
+        assert_eq!(frame.area().height, 1);
+
+        let buf = frame.buffer();
+        // "hello" at x=3 (left inset), not x=0
+        assert_eq!(buf[(3, 0)].symbol(), "h");
+        assert_eq!(buf[(4, 0)].symbol(), "e");
+    }
+
+    #[test]
+    fn insets_with_hstack_children() {
+        let mut r = Renderer::new(20);
+        let container = r.push(VStack);
+
+        // PaddedBox with 1-cell insets, horizontal layout inside
+        let padded = r.append_child(container, PaddedBox);
+        **r.state_mut::<PaddedBox>(padded) = Insets::all(1);
+        r.set_layout(padded, Layout::Horizontal);
+
+        let child1 = r.append_child(padded, TextBlock);
+        r.state_mut::<TextBlock>(child1).push("L".to_string());
+        // child1 gets Fill (default)
+
+        let child2 = r.append_child(padded, TextBlock);
+        r.state_mut::<TextBlock>(child2).push("R".to_string());
+        // child2 gets Fill (default)
+
+        let frame = r.render();
+        // Height: 1 + max(1,1) + 1 = 3
+        assert_eq!(frame.area().height, 3);
+
+        let buf = frame.buffer();
+        // Inner width = 20 - 2 = 18, split evenly = 9 each
+        // "L" at x=1 (left inset), "R" at x=10 (1 + 9)
+        assert_eq!(buf[(1, 1)].symbol(), "L");
+        assert_eq!(buf[(10, 1)].symbol(), "R");
+    }
+
+    #[test]
+    fn nested_insets() {
+        let mut r = Renderer::new(20);
+        let container = r.push(VStack);
+
+        // Outer box with 1-cell insets
+        let outer = r.append_child(container, PaddedBox);
+        **r.state_mut::<PaddedBox>(outer) = Insets::all(1);
+
+        // Inner box with 1-cell insets (nested)
+        let inner = r.append_child(outer, PaddedBox);
+        **r.state_mut::<PaddedBox>(inner) = Insets::all(1);
+
+        let child = r.append_child(inner, TextBlock);
+        r.state_mut::<TextBlock>(child).push("deep".to_string());
+
+        let frame = r.render();
+        // Height: 1 + (1 + 1 + 1) + 1 = 5
+        assert_eq!(frame.area().height, 5);
+
+        let buf = frame.buffer();
+        // Outer chrome at (0,0)
+        assert_eq!(buf[(0, 0)].symbol(), "+");
+        // Inner chrome at (1,1)
+        assert_eq!(buf[(1, 1)].symbol(), "+");
+        // "deep" at (2,2) — offset by both insets
+        assert_eq!(buf[(2, 2)].symbol(), "d");
     }
 }

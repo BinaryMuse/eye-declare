@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 use ratatui_core::{buffer::Buffer, layout::Rect};
 
 use crate::component::{Component, Tracked};
+use crate::insets::Insets;
 
 /// Opaque handle into the node arena.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -40,6 +41,7 @@ pub(crate) trait AnyComponent: Send + Sync {
     ) -> crate::component::EventResult;
     fn cursor_position_erased(&self, area: Rect, state: &dyn Any) -> Option<(u16, u16)>;
     fn is_focusable_erased(&self, state: &dyn Any) -> bool;
+    fn content_inset_erased(&self, state: &dyn Any) -> Insets;
 }
 
 impl<C: Component> AnyComponent for C {
@@ -81,6 +83,13 @@ impl<C: Component> AnyComponent for C {
             .downcast_ref::<C::State>()
             .expect("state type mismatch in is_focusable_erased");
         self.is_focusable(state)
+    }
+
+    fn content_inset_erased(&self, state: &dyn Any) -> Insets {
+        let state = state
+            .downcast_ref::<C::State>()
+            .expect("state type mismatch in content_inset_erased");
+        self.content_inset(state)
     }
 }
 

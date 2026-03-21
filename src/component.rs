@@ -2,6 +2,8 @@ use std::ops::{Deref, DerefMut};
 
 use ratatui_core::{buffer::Buffer, layout::Rect};
 
+use crate::insets::Insets;
+
 /// Result of handling an input event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EventResult {
@@ -104,6 +106,17 @@ pub trait Component: Send + Sync + 'static {
 
     /// Create the initial state for this component.
     fn initial_state(&self) -> Self::State;
+
+    /// Insets for the content area within this component's render area.
+    ///
+    /// The framework lays out children inside the inset region. The
+    /// component renders its own chrome (borders, padding) via `render()`
+    /// in the full area, then children are rendered within the inner area.
+    ///
+    /// Default: [`Insets::ZERO`] (children get the full area).
+    fn content_inset(&self, _state: &Self::State) -> Insets {
+        Insets::ZERO
+    }
 }
 
 /// A no-op container component for vertical stacking.
