@@ -11,6 +11,9 @@ plan — we build toward this incrementally.
 - Reconciliation (keyed + positional matching, state preservation)
 - Unified effect system (interval ticks, mount/unmount lifecycle hooks)
 - Horizontal + vertical layout (HStack/VStack, WidthConstraint)
+- Content insets (container chrome: borders, padding)
+- Composite children (slot-based children resolution)
+- Hooks system (declarative lifecycle via Hooks<S> collector)
 - InlineRenderer (growing scrollback), Terminal (event loop wrapper)
 
 ## Target Component Trait
@@ -440,12 +443,9 @@ useful and testable:
 3. ✅ Tick registration (framework-driven animation)
 4. ✅ Unified effect system (mount/unmount)
 5. ✅ Horizontal layout (HStack, WidthConstraint)
-6. **Content inset** — Insets type, content_inset on Component,
-   renderer uses insets for child layout
-7. **Composite children** — children() on Component, renderer
-   calls during reconciliation, two-path child resolution
-8. **Hooks** — Hooks<S> wrapper over effect system, lifecycle()
-   on Component
+6. ✅ Content inset (Insets type, content_inset on Component)
+7. ✅ Composite children (children() with slot parameter)
+8. ✅ Hooks (Hooks<S> collector, lifecycle() on Component)
 9. **Application wrapper** — owns state + view fn, set_state,
    managed event/tick loop
 10. **Committed scrollback** — InlineRenderer drops nodes that
