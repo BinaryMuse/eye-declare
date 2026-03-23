@@ -1,9 +1,11 @@
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc};
+use std::sync::Arc;
 use std::time::Duration;
 
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use futures::StreamExt;
+use tokio::sync::mpsc;
 
 use crate::component::VStack;
 use crate::element::Elements;
@@ -22,7 +24,7 @@ pub enum ControlFlow {
 /// A handle for sending state updates to a running [`Application`]
 /// from other threads or async tasks.
 ///
-/// `Handle` is `Send + Clone`. Clone it for each thread or task
+/// `Handle` is `Send + Sync + Clone`. Clone it for each task
 /// that needs to send updates. Updates are applied on the next
 /// frame before rebuild.
 ///
@@ -33,12 +35,15 @@ pub enum ControlFlow {
 /// });
 /// ```
 pub struct Handle<S: Send + 'static> {
-    tx: mpsc::Sender<Box<dyn FnOnce(&mut S) + Send>>,
+    tx: mpsc::UnboundedSender<Box<dyn FnOnce(&mut S) + Send>>,
     exit: Arc<AtomicBool>,
 }
 
 impl<S: Send + 'static> Handle<S> {
     /// Queue a state mutation. Applied on the next frame.
+    ///
+    /// This is non-blocking and can be called from both sync and
+    /// async contexts.
     pub fn update(&self, f: impl FnOnce(&mut S) + Send + 'static) {
         let _ = self.tx.send(Box::new(f));
     }
@@ -97,7 +102,7 @@ impl<S: Send + 'static> ApplicationBuilder<S> {
             None => crossterm::terminal::size()?.0,
         };
 
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = mpsc::unbounded_channel();
         let exit = Arc::new(AtomicBool::new(false));
         let handle = Handle {
             tx,
@@ -134,7 +139,7 @@ impl<S: Send + 'static> ApplicationBuilder<S> {
 ///
 /// app.run(|event, state| {
 ///     ControlFlow::Continue
-/// })?;
+/// }).await?;
 /// ```
 ///
 /// **Step API** for custom loops:
@@ -149,7 +154,7 @@ pub struct Application<S: Send + 'static> {
     inline: InlineRenderer,
     container: NodeId,
     dirty: bool,
-    rx: mpsc::Receiver<Box<dyn FnOnce(&mut S) + Send>>,
+    rx: mpsc::UnboundedReceiver<Box<dyn FnOnce(&mut S) + Send>>,
     exit: Arc<AtomicBool>,
 }
 
@@ -165,13 +170,11 @@ impl<S: Send + 'static> Application<S> {
 
     /// Run the interactive event loop.
     ///
-    /// Enables terminal raw mode, polls events, ticks effects,
-    /// and renders. The handler receives terminal events and
-    /// mutable state; return [`ControlFlow::Exit`] to stop.
-    /// Ctrl+C always exits.
-    ///
-    /// Handle updates from other threads are drained each frame.
-    pub fn run(
+    /// Enables terminal raw mode and uses `tokio::select!` to
+    /// multiplex terminal events, handle updates, and effect ticks.
+    /// The handler receives terminal events and mutable state;
+    /// return [`ControlFlow::Exit`] to stop. Ctrl+C always exits.
+    pub async fn run(
         &mut self,
         mut handler: impl FnMut(&Event, &mut S) -> ControlFlow,
     ) -> io::Result<()> {
@@ -182,7 +185,7 @@ impl<S: Send + 'static> Application<S> {
         self.flush_to(&mut stdout)?;
 
         crossterm::terminal::enable_raw_mode()?;
-        let result = self.event_loop(&mut handler, &mut stdout);
+        let result = self.event_loop(&mut handler, &mut stdout).await;
         crossterm::terminal::disable_raw_mode()?;
 
         // Show cursor and newline for clean terminal state
@@ -196,11 +199,11 @@ impl<S: Send + 'static> Application<S> {
     ///
     /// Useful for non-interactive animations (e.g., spinners that
     /// complete on their own). Does not poll terminal events or
-    /// enable raw mode.
-    pub fn run_while_active(&mut self, writer: &mut impl Write) -> io::Result<()> {
+    /// enable raw mode. Drains handle updates each frame.
+    pub async fn run_while_active(&mut self, writer: &mut impl Write) -> io::Result<()> {
         self.flush(writer)?;
         while self.has_active() {
-            std::thread::sleep(Duration::from_millis(16));
+            tokio::time::sleep(Duration::from_millis(16)).await;
             self.tick();
             self.drain_updates();
             if self.dirty {
@@ -260,66 +263,70 @@ impl<S: Send + 'static> Application<S> {
 
     // --- Internals ---
 
-    fn event_loop(
+    async fn event_loop(
         &mut self,
         handler: &mut impl FnMut(&Event, &mut S) -> ControlFlow,
         stdout: &mut impl Write,
     ) -> io::Result<()> {
+        let mut event_stream = crossterm::event::EventStream::new();
+        let mut tick_interval = tokio::time::interval(Duration::from_millis(16));
+
         loop {
             if self.exit.load(Ordering::Acquire) {
                 break;
             }
 
-            let poll_timeout = if self.inline.has_active() {
-                Duration::from_millis(16) // ~60fps when animating
-            } else {
-                Duration::from_millis(100) // idle
-            };
+            let has_active = self.inline.has_active();
 
-            if event::poll(poll_timeout)? {
-                let evt = event::read()?;
+            tokio::select! {
+                maybe_event = event_stream.next() => {
+                    let evt = match maybe_event {
+                        Some(Ok(evt)) => evt,
+                        Some(Err(e)) => return Err(e),
+                        None => break, // stream ended
+                    };
 
-                // Ctrl+C always exits
-                if let Event::Key(KeyEvent {
-                    code: KeyCode::Char('c'),
-                    modifiers,
-                    kind: KeyEventKind::Press,
-                    ..
-                }) = &evt
-                {
-                    if modifiers.contains(KeyModifiers::CONTROL) {
-                        break;
+                    // Ctrl+C always exits
+                    if let Event::Key(KeyEvent {
+                        code: KeyCode::Char('c'),
+                        modifiers,
+                        kind: KeyEventKind::Press,
+                        ..
+                    }) = &evt
+                    {
+                        if modifiers.contains(KeyModifiers::CONTROL) {
+                            break;
+                        }
+                    }
+
+                    // Handle resize
+                    if let Event::Resize(new_width, _) = &evt {
+                        let output = self.inline.resize(*new_width);
+                        stdout.write_all(&output)?;
+                        stdout.flush()?;
+                        self.dirty = true;
+                    } else {
+                        // Framework handles first (focus routing, tab cycling)
+                        self.inline.handle_event(&evt);
+
+                        // Then app handler
+                        let flow = handler(&evt, &mut self.state);
+                        self.dirty = true;
+
+                        if matches!(flow, ControlFlow::Exit) {
+                            break;
+                        }
                     }
                 }
 
-                // Handle resize
-                if let Event::Resize(new_width, _) = &evt {
-                    let output = self.inline.resize(*new_width);
-                    stdout.write_all(&output)?;
-                    stdout.flush()?;
-                    // Rebuild at new width
+                Some(update) = self.rx.recv() => {
+                    update(&mut self.state);
                     self.dirty = true;
-                    // Fall through to rebuild+render below
-                } else {
-                    // Framework handles first (focus routing, tab cycling)
-                    self.inline.handle_event(&evt);
-
-                    // Then app handler
-                    let flow = handler(&evt, &mut self.state);
-                    self.dirty = true;
-
-                    if matches!(flow, ControlFlow::Exit) {
-                        break;
-                    }
                 }
-            }
 
-            // Drain handle updates
-            self.drain_updates();
-
-            // Tick effects
-            if self.inline.has_active() {
-                self.inline.tick();
+                _ = tick_interval.tick(), if has_active => {
+                    self.inline.tick();
+                }
             }
 
             // Rebuild + render
@@ -602,5 +609,60 @@ mod tests {
         // Can access renderer for advanced operations
         let renderer = app.renderer();
         assert!(!renderer.has_active());
+    }
+
+    #[tokio::test]
+    async fn run_while_active_completes() {
+        let (mut app, handle) = Application::builder()
+            .state(true) // show spinner
+            .view(|show: &bool| {
+                let mut els = Elements::new();
+                if *show {
+                    els.add(SpinnerEl::new("loading")).key("s");
+                }
+                els
+            })
+            .width(20)
+            .build()
+            .unwrap();
+
+        // Stop the spinner after a short delay
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            handle.update(|s| *s = false);
+        });
+
+        let mut buf = Vec::new();
+        app.run_while_active(&mut buf).await.unwrap();
+        assert!(!app.has_active());
+    }
+
+    #[tokio::test]
+    async fn handle_update_from_async_task() {
+        let (mut app, handle) = Application::builder()
+            .state(0u32)
+            .view(|n: &u32| {
+                let mut els = Elements::new();
+                els.add(TextBlockEl::new().line(
+                    &format!("count: {}", n),
+                    Style::default(),
+                ));
+                els
+            })
+            .width(20)
+            .build()
+            .unwrap();
+
+        let mut buf = Vec::new();
+        app.flush(&mut buf).unwrap();
+
+        let task = tokio::spawn(async move {
+            handle.update(|s| *s = 99);
+        });
+        task.await.unwrap();
+
+        let mut buf = Vec::new();
+        app.flush(&mut buf).unwrap();
+        assert_eq!(*app.state(), 99);
     }
 }
