@@ -5,6 +5,7 @@ use ratatui_core::{buffer::Buffer, layout::Rect};
 
 use crate::component::{Component, Tracked};
 use crate::element::Elements;
+use crate::hooks::Hooks;
 use crate::insets::Insets;
 
 /// Opaque handle into the node arena.
@@ -44,6 +45,7 @@ pub(crate) trait AnyComponent: Send + Sync {
     fn is_focusable_erased(&self, state: &dyn Any) -> bool;
     fn content_inset_erased(&self, state: &dyn Any) -> Insets;
     fn children_erased(&self, state: &dyn Any, slot: Option<Elements>) -> Option<Elements>;
+    fn lifecycle_erased(&self, state: &dyn Any) -> Vec<Effect>;
 }
 
 impl<C: Component> AnyComponent for C {
@@ -99,6 +101,15 @@ impl<C: Component> AnyComponent for C {
             .downcast_ref::<C::State>()
             .expect("state type mismatch in children_erased");
         self.children(state, slot)
+    }
+
+    fn lifecycle_erased(&self, state: &dyn Any) -> Vec<Effect> {
+        let state = state
+            .downcast_ref::<C::State>()
+            .expect("state type mismatch in lifecycle_erased");
+        let mut hooks = Hooks::<C::State>::new();
+        self.lifecycle(&mut hooks, state);
+        hooks.into_effects()
     }
 }
 

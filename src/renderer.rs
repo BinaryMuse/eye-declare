@@ -466,6 +466,7 @@ impl Renderer {
                 self.nodes[old_id.0].width_constraint = entry.width_constraint;
                 // Guarantee re-render after props update
                 self.nodes[old_id.0].force_dirty = true;
+                self.apply_lifecycle(old_id);
 
                 // Resolve children: component decides (slot = external children)
                 let resolved = self.resolve_children(old_id, entry.children);
@@ -480,6 +481,7 @@ impl Renderer {
                 self.nodes[id.0].element_type_id = Some(entry.type_id);
                 self.nodes[id.0].key = entry.key;
                 self.nodes[id.0].width_constraint = entry.width_constraint;
+                self.apply_lifecycle(id);
                 self.fire_mount(id);
 
                 // Resolve children: component decides (slot = external children)
@@ -515,6 +517,7 @@ impl Renderer {
             self.nodes[node_id.0].element_type_id = Some(entry.type_id);
             self.nodes[node_id.0].key = entry.key;
             self.nodes[node_id.0].width_constraint = entry.width_constraint;
+            self.apply_lifecycle(node_id);
             self.fire_mount(node_id);
 
             let resolved = self.resolve_children(node_id, entry.children);
@@ -532,15 +535,33 @@ impl Renderer {
         node.component.children_erased(state, slot)
     }
 
+    /// Run the component's lifecycle method and apply resulting effects.
+    ///
+    /// If the component called `manage_effects()`, existing effects
+    /// are replaced with the new set. Otherwise effects are untouched
+    /// (backward compatibility with imperative registration).
+    fn apply_lifecycle(&mut self, id: NodeId) {
+        let effects = {
+            let node = &self.nodes[id.0];
+            node.component.lifecycle_erased(node.state.inner_as_any())
+        };
+        if effects.is_empty() {
+            self.effects.remove(&id);
+        } else {
+            self.effects.insert(id, effects);
+        }
+    }
+
     /// Tombstone a node and all its descendants without touching the
     /// parent's children list (caller is responsible for that).
     fn tombstone_subtree(&mut self, id: NodeId) {
-        self.fire_unmount(id);
-        self.effects.remove(&id);
+        // Children unmount first (bottom-up), then parent
         let children = std::mem::take(&mut self.nodes[id.0].children);
         for child_id in children {
             self.tombstone_subtree(child_id);
         }
+        self.fire_unmount(id);
+        self.effects.remove(&id);
         let node = &mut self.nodes[id.0];
         node.parent = None;
         node.frozen = true;
@@ -1938,47 +1959,65 @@ mod tests {
     /// Component with a log of lifecycle events.
     struct LifecycleWidget;
 
+    struct LifecycleState {
+        log: Vec<String>,
+        mount_marker: String,
+        unmount_marker: String,
+    }
+
     impl Component for LifecycleWidget {
-        type State = Vec<String>; // log of events
+        type State = LifecycleState;
 
         fn render(&self, area: Rect, buf: &mut Buffer, state: &Self::State) {
-            let text = state.join(", ");
+            let text = state.log.join(", ");
             let line = ratatui_core::text::Line::raw(text);
             ratatui_core::widgets::Widget::render(Paragraph::new(line), area, buf);
         }
 
         fn desired_height(&self, _width: u16, state: &Self::State) -> u16 {
-            if state.is_empty() { 0 } else { 1 }
+            if state.log.is_empty() { 0 } else { 1 }
         }
 
-        fn initial_state(&self) -> Vec<String> {
-            Vec::new()
+        fn initial_state(&self) -> LifecycleState {
+            LifecycleState {
+                log: Vec::new(),
+                mount_marker: String::new(),
+                unmount_marker: String::new(),
+            }
+        }
+
+        fn lifecycle(&self, hooks: &mut Hooks<LifecycleState>, state: &LifecycleState) {
+            let mount_marker = state.mount_marker.clone();
+            if !mount_marker.is_empty() {
+                hooks.use_mount(move |s| {
+                    s.log.push(mount_marker.clone());
+                });
+            }
+            let unmount_marker = state.unmount_marker.clone();
+            if !unmount_marker.is_empty() {
+                hooks.use_unmount(move |s| {
+                    s.log.push(unmount_marker.clone());
+                });
+            }
         }
     }
 
     impl Element for LifecycleEl {
         fn build(self: Box<Self>, renderer: &mut Renderer, parent: NodeId) -> NodeId {
             let id = renderer.append_child(parent, LifecycleWidget);
-            renderer.state_mut::<LifecycleWidget>(id).push(self.label.clone());
-
-            let mount_marker = self.mount_marker;
-            renderer.on_mount::<LifecycleWidget>(id, move |state| {
-                state.push(mount_marker.clone());
-            });
-
-            let unmount_marker = self.unmount_marker;
-            renderer.on_unmount::<LifecycleWidget>(id, move |state| {
-                state.push(unmount_marker.clone());
-            });
-
+            let state = renderer.state_mut::<LifecycleWidget>(id);
+            state.log.push(self.label.clone());
+            state.mount_marker = self.mount_marker;
+            state.unmount_marker = self.unmount_marker;
             id
         }
 
         fn update(self: Box<Self>, renderer: &mut Renderer, node_id: NodeId) {
             let state = renderer.state_mut::<LifecycleWidget>(node_id);
-            // Clear and set label, but lifecycle log entries persist
-            state.retain(|s| s.starts_with("mounted:") || s.starts_with("unmounted:"));
-            state.push(self.label.clone());
+            state.log.retain(|s| s.starts_with("mounted:") || s.starts_with("unmounted:"));
+            state.log.push(self.label.clone());
+            state.mount_marker = self.mount_marker;
+            state.unmount_marker = self.unmount_marker;
         }
     }
 
@@ -1994,8 +2033,8 @@ mod tests {
         let id = r.find_by_key(container, "a").unwrap();
         let state = r.state_mut::<LifecycleWidget>(id);
         // Should have: label from build, then mount marker
-        assert!(state.contains(&"hello".to_string()));
-        assert!(state.contains(&"mounted:hello".to_string()));
+        assert!(state.log.contains(&"hello".to_string()));
+        assert!(state.log.contains(&"mounted:hello".to_string()));
     }
 
     #[test]
@@ -2010,7 +2049,7 @@ mod tests {
 
         let id = r.find_by_key(container, "a").unwrap();
         let mount_count = r.state_mut::<LifecycleWidget>(id)
-            .iter()
+            .log.iter()
             .filter(|s| s.starts_with("mounted:"))
             .count();
         assert_eq!(mount_count, 1);
@@ -2021,7 +2060,7 @@ mod tests {
         r.rebuild(container, els);
 
         let state = r.state_mut::<LifecycleWidget>(id);
-        let mount_count = state.iter().filter(|s| s.starts_with("mounted:")).count();
+        let mount_count = state.log.iter().filter(|s| s.starts_with("mounted:")).count();
         assert_eq!(mount_count, 1); // still just 1
     }
 
@@ -2042,7 +2081,7 @@ mod tests {
         // The node is tombstoned, but we can still read its state
         // (tombstoned nodes stay in the arena)
         let state = r.state_mut::<LifecycleWidget>(id);
-        assert!(state.contains(&"unmounted:bye".to_string()));
+        assert!(state.log.contains(&"unmounted:bye".to_string()));
     }
 
     #[test]
@@ -2056,9 +2095,9 @@ mod tests {
 
         // Build parent with child
         let parent_id = r.append_child(container, LifecycleWidget);
-        r.state_mut::<LifecycleWidget>(parent_id).push("parent".to_string());
+        r.state_mut::<LifecycleWidget>(parent_id).log.push("parent".to_string());
         let child_id = r.append_child(parent_id, LifecycleWidget);
-        r.state_mut::<LifecycleWidget>(child_id).push("child".to_string());
+        r.state_mut::<LifecycleWidget>(child_id).log.push("child".to_string());
 
         let order_clone = order.clone();
         r.on_unmount::<LifecycleWidget>(parent_id, move |_state| {
@@ -2073,7 +2112,7 @@ mod tests {
         r.remove(parent_id);
 
         let fired = order.lock().unwrap();
-        assert_eq!(&*fired, &["parent", "child"]);
+        assert_eq!(&*fired, &["child", "parent"]);
     }
 
     #[test]
@@ -2094,33 +2133,25 @@ mod tests {
 
     #[test]
     fn multiple_effects_per_node() {
+        // Use the HookedCounter component which has interval via lifecycle
         let mut r = Renderer::new(10);
         let container = r.push(VStack);
 
-        // Build with lifecycle element — has mount + unmount
         let mut els = Elements::new();
-        els.add(LifecycleEl::new("multi")).key("m");
+        els.add(HookedCounterEl { label: "multi".into() }).key("m");
         r.rebuild(container, els);
 
         let id = r.find_by_key(container, "m").unwrap();
-
-        // Also register a tick
-        r.register_tick::<LifecycleWidget>(id, Duration::from_millis(1), |state| {
-            state.push("ticked".to_string());
-        });
-
-        // All three effects (mount already fired, unmount waiting, tick active)
-        assert!(r.has_active()); // tick is active
+        assert!(r.has_active()); // interval active
 
         // Tick should work
         std::thread::sleep(Duration::from_millis(5));
         r.tick();
-        assert!(r.state_mut::<LifecycleWidget>(id).contains(&"ticked".to_string()));
+        assert!(r.state_mut::<HookedCounter>(id).1 > 0); // count incremented
 
-        // Tombstone fires unmount and cleans everything
+        // Tombstone cleans everything
         r.rebuild(container, Elements::new());
         assert!(!r.has_active());
-        assert!(r.state_mut::<LifecycleWidget>(id).contains(&"unmounted:multi".to_string()));
     }
 
     // --- HStack / horizontal layout tests ---
@@ -2680,5 +2711,153 @@ mod tests {
         assert_eq!(buf[(0, 1)].symbol(), ">"); // prefix
         assert_eq!(buf[(2, 1)].symbol(), "n"); // "nested" at x=2
         assert_eq!(buf[(0, 2)].symbol(), "b"); // "below"
+    }
+
+    // --- Hooks / lifecycle tests ---
+
+    use crate::hooks::Hooks;
+
+    /// A component that uses lifecycle to manage its own interval.
+    struct HookedCounter;
+
+    impl Component for HookedCounter {
+        type State = (String, usize); // (label, count)
+
+        fn render(&self, area: Rect, buf: &mut Buffer, state: &Self::State) {
+            let line = ratatui_core::text::Line::raw(state.0.as_str());
+            ratatui_core::widgets::Widget::render(Paragraph::new(line), area, buf);
+        }
+
+        fn desired_height(&self, _width: u16, state: &Self::State) -> u16 {
+            if state.0.is_empty() { 0 } else { 1 }
+        }
+
+        fn initial_state(&self) -> (String, usize) {
+            (String::new(), 0)
+        }
+
+        fn lifecycle(&self, hooks: &mut Hooks<(String, usize)>, state: &(String, usize)) {
+            if state.0 != "stop" {
+                hooks.use_interval(Duration::from_millis(1), |s| {
+                    s.1 += 1;
+                });
+            }
+            // When label is "stop", no interval → old interval cleared
+        }
+    }
+
+    struct HookedCounterEl { label: String }
+
+    impl Element for HookedCounterEl {
+        fn build(self: Box<Self>, renderer: &mut Renderer, parent: NodeId) -> NodeId {
+            let id = renderer.append_child(parent, HookedCounter);
+            let state = renderer.state_mut::<HookedCounter>(id);
+            state.0 = self.label;
+            id
+        }
+
+        fn update(self: Box<Self>, renderer: &mut Renderer, node_id: NodeId) {
+            let state = renderer.state_mut::<HookedCounter>(node_id);
+            state.0 = self.label;
+            // No effect management — lifecycle handles it
+        }
+    }
+
+    #[test]
+    fn lifecycle_registers_effects_on_build() {
+        let mut r = Renderer::new(10);
+        let container = r.push(VStack);
+
+        let mut els = Elements::new();
+        els.add(HookedCounterEl { label: "active".into() });
+        r.rebuild(container, els);
+
+        // Lifecycle should have registered an interval
+        assert!(r.has_active());
+    }
+
+    #[test]
+    fn lifecycle_clears_effects_on_update() {
+        let mut r = Renderer::new(10);
+        let container = r.push(VStack);
+
+        // Build with active interval
+        let mut els = Elements::new();
+        els.add(HookedCounterEl { label: "active".into() }).key("c");
+        r.rebuild(container, els);
+        assert!(r.has_active());
+
+        // Update to "stop" — lifecycle re-runs, no interval registered → cleared
+        let mut els = Elements::new();
+        els.add(HookedCounterEl { label: "stop".into() }).key("c");
+        r.rebuild(container, els);
+        assert!(!r.has_active());
+    }
+
+    #[test]
+    fn lifecycle_interval_fires() {
+        let mut r = Renderer::new(10);
+        let container = r.push(VStack);
+
+        let mut els = Elements::new();
+        els.add(HookedCounterEl { label: "go".into() }).key("c");
+        r.rebuild(container, els);
+
+        let id = r.find_by_key(container, "c").unwrap();
+        assert_eq!(r.state_mut::<HookedCounter>(id).1, 0); // count starts at 0
+
+        std::thread::sleep(Duration::from_millis(5));
+        r.tick();
+
+        assert!(r.state_mut::<HookedCounter>(id).1 > 0); // count incremented
+    }
+
+    #[test]
+    fn lifecycle_with_mount_and_unmount() {
+        let mut r = Renderer::new(10);
+        let container = r.push(VStack);
+
+        // Component that uses lifecycle for mount/unmount
+        struct MountTracker;
+        impl Component for MountTracker {
+            type State = Vec<String>;
+            fn render(&self, area: Rect, buf: &mut Buffer, state: &Self::State) {
+                let text = state.join(",");
+                let line = ratatui_core::text::Line::raw(text);
+                ratatui_core::widgets::Widget::render(Paragraph::new(line), area, buf);
+            }
+            fn desired_height(&self, _width: u16, state: &Self::State) -> u16 {
+                if state.is_empty() { 0 } else { 1 }
+            }
+            fn initial_state(&self) -> Vec<String> { Vec::new() }
+            fn lifecycle(&self, hooks: &mut Hooks<Vec<String>>, _state: &Vec<String>) {
+                hooks.use_mount(|s| s.push("mounted".into()));
+                hooks.use_unmount(|s| s.push("unmounted".into()));
+            }
+        }
+
+        struct MountTrackerEl;
+        impl Element for MountTrackerEl {
+            fn build(self: Box<Self>, renderer: &mut Renderer, parent: NodeId) -> NodeId {
+                let id = renderer.append_child(parent, MountTracker);
+                renderer.state_mut::<MountTracker>(id).push("built".into());
+                id
+            }
+            fn update(self: Box<Self>, _renderer: &mut Renderer, _node_id: NodeId) {}
+        }
+
+        let mut els = Elements::new();
+        els.add(MountTrackerEl).key("mt");
+        r.rebuild(container, els);
+
+        let id = r.find_by_key(container, "mt").unwrap();
+        let state = r.state_mut::<MountTracker>(id);
+        assert!(state.contains(&"built".to_string()));
+        assert!(state.contains(&"mounted".to_string()));
+
+        // Tombstone — unmount fires
+        r.rebuild(container, Elements::new());
+        let state = r.state_mut::<MountTracker>(id);
+        assert!(state.contains(&"unmounted".to_string()));
     }
 }

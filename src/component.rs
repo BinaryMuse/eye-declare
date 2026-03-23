@@ -3,6 +3,7 @@ use std::ops::{Deref, DerefMut};
 use ratatui_core::{buffer::Buffer, layout::Rect};
 
 use crate::element::Elements;
+use crate::hooks::Hooks;
 use crate::insets::Insets;
 
 /// Result of handling an input event.
@@ -118,6 +119,16 @@ pub trait Component: Send + Sync + 'static {
     fn content_inset(&self, _state: &Self::State) -> Insets {
         Insets::ZERO
     }
+
+    /// Declare lifecycle effects for this component.
+    ///
+    /// Called by the framework after build and update. Use the `hooks`
+    /// parameter to register intervals, mount/unmount handlers, etc.
+    /// The framework clears old effects and applies the new set on
+    /// every call.
+    ///
+    /// Default: no-op (no effects).
+    fn lifecycle(&self, _hooks: &mut Hooks<Self::State>, _state: &Self::State) {}
 
     /// Return child elements for this component.
     ///

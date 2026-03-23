@@ -1,9 +1,8 @@
 //! Lifecycle hooks: mount and unmount effects.
 //!
-//! Demonstrates on_mount and on_unmount handlers that fire when
-//! elements enter and leave the tree during reconciliation.
-//! Also shows the unified effect system — ticks, mount, and unmount
-//! all coexist on the same node.
+//! Demonstrates the hooks system — components declare their effects
+//! via lifecycle(), and the framework manages them automatically.
+//! Mount fires when elements enter the tree, unmount when they leave.
 //!
 //! Run with: cargo run --example lifecycle
 
@@ -12,7 +11,7 @@ use std::thread;
 use std::time::Duration;
 
 use eye_declare::{
-    Component, Element, Elements, InlineRenderer, Renderer, SpinnerEl, TextBlockEl, VStack,
+    Component, Element, Elements, Hooks, InlineRenderer, Renderer, SpinnerEl, TextBlockEl, VStack,
 };
 use ratatui_core::{
     buffer::Buffer,
@@ -32,6 +31,7 @@ use eye_declare::NodeId;
 struct StatusLog;
 
 struct StatusLogState {
+    name: String,
     entries: Vec<(String, Style)>,
 }
 
@@ -59,13 +59,38 @@ impl Component for StatusLog {
 
     fn initial_state(&self) -> StatusLogState {
         StatusLogState {
+            name: String::new(),
             entries: Vec::new(),
+        }
+    }
+
+    fn lifecycle(&self, hooks: &mut Hooks<StatusLogState>, state: &StatusLogState) {
+        let name = state.name.clone();
+        if !name.is_empty() {
+            let mount_name = name.clone();
+            hooks.use_mount(move |state| {
+                state.log(
+                    format!("  {} mounted", mount_name),
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::ITALIC),
+                );
+            });
+
+            hooks.use_unmount(move |state| {
+                state.log(
+                    format!("  {} unmounted", name),
+                    Style::default()
+                        .fg(Color::Red)
+                        .add_modifier(Modifier::ITALIC),
+                );
+            });
         }
     }
 }
 
 // ---------------------------------------------------------------------------
-// A task element with mount/unmount lifecycle hooks
+// A task element — sets state, lifecycle handles effects
 // ---------------------------------------------------------------------------
 
 struct TaskEl {
@@ -82,38 +107,18 @@ impl Element for TaskEl {
     fn build(self: Box<Self>, renderer: &mut Renderer, parent: NodeId) -> NodeId {
         let id = renderer.append_child(parent, StatusLog);
         let state = renderer.state_mut::<StatusLog>(id);
+        state.name = self.name.clone();
         state.log(
             format!("  {} created", self.name),
             Style::default().fg(Color::DarkGray),
         );
-
-        // On mount: log when this task enters the tree
-        let name = self.name.clone();
-        renderer.on_mount::<StatusLog>(id, move |state| {
-            state.log(
-                format!("  {} mounted", name),
-                Style::default()
-                    .fg(Color::Green)
-                    .add_modifier(Modifier::ITALIC),
-            );
-        });
-
-        // On unmount: log when this task leaves the tree
-        let name = self.name;
-        renderer.on_unmount::<StatusLog>(id, move |state| {
-            state.log(
-                format!("  {} unmounted", name),
-                Style::default()
-                    .fg(Color::Red)
-                    .add_modifier(Modifier::ITALIC),
-            );
-        });
-
+        // Effects handled by StatusLog::lifecycle()
         id
     }
 
     fn update(self: Box<Self>, renderer: &mut Renderer, node_id: NodeId) {
         let state = renderer.state_mut::<StatusLog>(node_id);
+        state.name = self.name.clone();
         state.log(
             format!("  {} updated", self.name),
             Style::default().fg(Color::Yellow),

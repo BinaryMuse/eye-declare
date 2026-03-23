@@ -7,7 +7,10 @@ use ratatui_core::{
 };
 use ratatui_widgets::paragraph::Paragraph;
 
+use std::time::Duration;
+
 use crate::component::Component;
+use crate::hooks::Hooks;
 
 const FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -89,6 +92,12 @@ impl Component for Spinner {
 
     fn initial_state(&self) -> SpinnerState {
         SpinnerState::new("")
+    }
+
+    fn lifecycle(&self, hooks: &mut Hooks<SpinnerState>, state: &SpinnerState) {
+        if !state.done {
+            hooks.use_interval(Duration::from_millis(80), |s| s.tick());
+        }
     }
 }
 
