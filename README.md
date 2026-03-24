@@ -170,6 +170,44 @@ element! {
 
 Components can declare `content_inset()` for borders and padding — children render inside the inset area while the component draws chrome in the full area.
 
+### Composite Components
+
+Components can generate their own child trees via the `children()` method. The `slot` parameter carries externally-provided children (like React's `props.children`), letting components wrap, replace, or pass through content:
+
+```rust
+#[derive(Default)]
+struct Card {
+    pub title: String,
+}
+
+impl Component for Card {
+    type State = ();
+
+    fn children(&self, _state: &(), slot: Option<Elements>) -> Option<Elements> {
+        // Wrap slot children in a header + content layout
+        let mut els = Elements::new();
+        els.add(TextBlock::new().line(&self.title, heading_style));
+        if let Some(children) = slot {
+            els.group(children); // slot children go here
+        }
+        Some(els)
+    }
+
+    fn content_inset(&self, _state: &()) -> Insets {
+        Insets::all(1) // border chrome
+    }
+
+    // render() draws the border, children render inside the inset
+    # fn render(&self, _: Rect, _: &mut Buffer, _: &()) {}
+    # fn desired_height(&self, _: u16, _: &()) -> u16 { 0 }
+}
+```
+
+Three patterns:
+- **Pass through** (default) — VStack, HStack accept external children as-is
+- **Generate own tree** — a Spinner builds its own frame + label layout
+- **Wrap slot** — a Card wraps external children in a header + border
+
 ### Committed Scrollback
 
 For long-running apps, content that scrolls into terminal scrollback can be evicted from state via an `on_commit` callback:
