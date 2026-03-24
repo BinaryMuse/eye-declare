@@ -4,6 +4,8 @@ A declarative inline TUI rendering library for Rust, built on [ratatui](https://
 
 eye-declare provides a React-like component model for building terminal UIs that render inline (growing into terminal scrollback) rather than taking over the full screen. Designed for CLI tools, AI assistants, and interactive prompts.
 
+![Demo](https://github.com/BinaryMuse/eye-declare/blob/main/assets/demo.gif?raw=true)
+
 ## Status
 
 eye-declare is in early development; expect breaking changes.
