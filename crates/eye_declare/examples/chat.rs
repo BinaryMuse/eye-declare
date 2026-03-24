@@ -350,10 +350,7 @@ async fn main() -> io::Result<()> {
 
     // Initial build + set focus on the input box
     app.update(|_| {});
-    {
-        let mut buf = Vec::new();
-        app.flush(&mut buf)?;
-    }
+    app.flush(&mut io::stdout())?;
     // Find and focus the input
     let renderer = app.renderer();
     let container = renderer.children(renderer.root())[0];
