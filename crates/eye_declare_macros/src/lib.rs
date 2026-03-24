@@ -25,8 +25,8 @@ use proc_macro::TokenStream;
 /// - `#(if cond { ... })` — conditional children
 /// - `#(for pat in iter { ... })` — loop children
 ///
-/// `key` and `width` are special props — they map to `.key()` and
-/// `.width()` on the element handle, not struct fields.
+/// `key` is a special prop — it maps to `.key()` on the element handle,
+/// not a struct field. It provides stable identity for reconciliation.
 #[proc_macro]
 pub fn element(input: TokenStream) -> TokenStream {
     match element_impl(input.into()) {

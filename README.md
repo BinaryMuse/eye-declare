@@ -6,13 +6,18 @@ eye-declare provides a React-like component model for building terminal UIs that
 
 ## Status
 
-eye-declare is in early development; expect breaking changes
+eye-declare is in early development; expect breaking changes.
+
+Coming changes:
+
+- [ ] Better HStack layout options
+- [ ] More ergonomic "leaf" API
 
 ## Quick Start
 
 ```rust
 use eye_declare::{element, Application, Elements, Spinner, TextBlock};
-use ratatui_core::style::{Color, Modifier, Style};
+use ratatui_core::style::Style;
 
 struct AppState {
     messages: Vec<String>,
@@ -39,22 +44,50 @@ async fn main() -> std::io::Result<()> {
         .view(chat_view)
         .build()?;
 
-    // Send updates from async tasks
+    // Send updates from any thread or async task
     tokio::spawn(async move {
-        handle.update(|s| {
-            s.messages.push("Hello from eye_declare!".into());
-        });
+        handle.update(|s| s.messages.push("Hello from eye_declare!".into()));
     });
 
     app.run().await
 }
 ```
 
-## Features
+## The `element!` Macro
 
-### Component Model
+The `element!` macro is the primary way to build UIs. It provides JSX-like syntax for composing component trees:
 
-Components carry their props directly and get automatic reconciliation.
+```rust
+fn dashboard(state: &DashboardState) -> Elements {
+    element! {
+        VStack {
+            TextBlock(lines: vec![("Dashboard".into(), bold_style)])
+
+            #(for (i, item) in state.items.iter().enumerate() {
+                Markdown(key: format!("item-{i}"), source: item.clone())
+            })
+
+            #(if state.loading {
+                Spinner(label: "Refreshing...")
+            })
+
+            #(if let Some(ref err) = state.error {
+                TextBlock(lines: vec![(err.clone(), error_style)])
+            })
+        }
+    }
+}
+```
+
+- **Props** are set as `Component(prop: value, ...)` — these are struct fields on the component
+- **Children** go inside braces: `VStack { ... }`
+- **Keys** provide stable identity across rebuilds: `Spinner(key: "s", label: "...")`
+- **String literals** are auto-wrapped as `TextBlock`: `"hello"` becomes a single-line text block
+- **Control flow** uses `#(if)`, `#(if let)`, and `#(for)` for conditional and repeated elements
+
+## Components
+
+Components are the building blocks. Props live on `&self` (immutable, set by parent). Internal state lives in `State` (mutable, framework-managed via dirty tracking).
 
 ```rust
 use eye_declare::Component;
@@ -77,34 +110,110 @@ impl Component for StatusBadge {
 }
 ```
 
-Props live on `&self` (immutable, set by parent). Internal state lives in `State` (mutable, framework-managed). The framework handles build, update, and reconciliation automatically.
-
-### Declarative Views with `element!`
-
-The `element!` macro provides JSX-like syntax for building element trees:
+Then use it in a view:
 
 ```rust
-fn dashboard(state: &DashboardState) -> Elements {
-    element! {
-        VStack {
-            TextBlock(lines: vec![("Dashboard".into(), bold_style)])
-            #(for (i, item) in state.items.iter().enumerate() {
-                Markdown(key: format!("item-{i}"), source: item.clone())
-            })
-            #(if state.loading {
-                Spinner(label: "Refreshing...")
-            })
-            #(if let Some(ref err) = state.error {
-                TextBlock(lines: vec![(err.clone(), error_style)])
-            })
+element! {
+    StatusBadge(label: "Online".into(), color: Color::Green)
+}
+```
+
+### Composite Components
+
+Components can generate their own child trees via the `children()` method. The `slot` parameter carries externally-provided children (like React's `props.children`), letting components wrap, replace, or pass through content:
+
+```rust
+#[derive(Default)]
+struct Card {
+    pub title: String,
+}
+
+impl Component for Card {
+    type State = ();
+
+    fn children(&self, _state: &(), slot: Option<Elements>) -> Option<Elements> {
+        let mut els = Elements::new();
+        els.add(TextBlock::new().line(&self.title, heading_style));
+        if let Some(children) = slot {
+            els.group(children); // slot children rendered here
         }
+        Some(els)
+    }
+
+    fn content_inset(&self, _state: &()) -> Insets {
+        Insets::all(1) // border chrome
+    }
+
+    fn render(&self, area: Rect, buf: &mut Buffer, _state: &()) {
+        // draw border chrome; children render inside the inset
+    }
+
+    // ignored for containers (height is computed from children + insets)
+    fn desired_height(&self, _: u16, _: &()) -> u16 { 0 }
+}
+```
+
+Usage with `element!`:
+
+```rust
+element! {
+    Card(title: "My Card".into()) {
+        Spinner(label: "Loading...")
+        "Some content"
     }
 }
 ```
 
-Supports components with props, nested children, string literals (auto-wrapped as `TextBlock`), `#(if)`, `#(if let)`, `#(for)`, and special `key`/`width` props.
+Three patterns:
+- **Pass through** (default); ex: VStack, HStack accept external children as-is
+- **Generate own tree**; ex: a Spinner builds its own frame + label layout
+- **Wrap slot**; ex: a Card wraps external children in a header + border
 
-### Async Application Wrapper
+### Lifecycle Hooks
+
+Components declare effects via `lifecycle()`. The framework manages registration and cleanup.
+
+```rust
+impl Component for Timer {
+    fn lifecycle(&self, hooks: &mut Hooks<TimerState>, _state: &TimerState) {
+        if self.running {
+            hooks.use_interval(Duration::from_secs(1), |s| s.elapsed += 1);
+        }
+        hooks.use_mount(|s| s.started_at = Instant::now());
+        hooks.use_unmount(|s| println!("Timer ran for {:?}", s.started_at.elapsed()));
+    }
+}
+```
+
+## Layout
+
+Vertical stacking is the default. `HStack` provides horizontal layout, and children declare width constraints via the imperative API:
+
+```rust
+let mut els = Elements::new();
+els.add(TextBlock::new().lines(sidebar)).width(WidthConstraint::Fixed(20));
+els.add(TextBlock::new().lines(content)); // Fill (takes remaining space)
+```
+
+Components can declare `content_inset()` for borders and padding — children render inside the inset area while the component draws chrome in the full area.
+
+## Reconciliation
+
+Elements are matched by key (stable identity) or position (implicit). State is preserved across rebuilds when nodes are reused.
+
+```rust
+element! {
+    // Keyed: survives reordering, state preserved by key
+    #(for msg in &state.messages {
+        Markdown(key: format!("msg-{}", msg.id), source: msg.content.clone())
+    })
+
+    // Positional: matched by index + type
+    "Footer"
+}
+```
+
+## Application
 
 `Application` owns your state and manages the render loop. `Handle` sends updates from any thread or async task.
 
@@ -126,87 +235,6 @@ app.run_interactive(|event, state| {
 
 Multiple handle updates between frames are batched into a single rebuild.
 
-### Lifecycle Hooks
-
-Components declare effects via `lifecycle()`. The framework manages registration and cleanup.
-
-```rust
-impl Component for Timer {
-    fn lifecycle(&self, hooks: &mut Hooks<TimerState>, _state: &TimerState) {
-        if self.running {
-            hooks.use_interval(Duration::from_secs(1), |s| s.elapsed += 1);
-        }
-        hooks.use_mount(|s| s.started_at = Instant::now());
-        hooks.use_unmount(|s| println!("Timer ran for {:?}", s.started_at.elapsed()));
-    }
-}
-```
-
-### Reconciliation
-
-Elements are matched by key (stable identity) or position (implicit). State is preserved across rebuilds when nodes are reused.
-
-```rust
-// Keyed: survives reordering
-els.add(Markdown::new(&msg.content)).key(format!("msg-{}", msg.id));
-
-// Positional: matched by index + type
-els.add(TextBlock::new().unstyled("Footer"));
-```
-
-### Layout
-
-Vertical stacking (default) and horizontal layout with width constraints:
-
-```rust
-element! {
-    HStack {
-        TextBlock(width: WidthConstraint::Fixed(20), lines: sidebar_lines)
-        TextBlock(lines: main_content) // Fill (takes remaining space)
-    }
-}
-```
-
-Components can declare `content_inset()` for borders and padding — children render inside the inset area while the component draws chrome in the full area.
-
-### Composite Components
-
-Components can generate their own child trees via the `children()` method. The `slot` parameter carries externally-provided children (like React's `props.children`), letting components wrap, replace, or pass through content:
-
-```rust
-#[derive(Default)]
-struct Card {
-    pub title: String,
-}
-
-impl Component for Card {
-    type State = ();
-
-    fn children(&self, _state: &(), slot: Option<Elements>) -> Option<Elements> {
-        // Wrap slot children in a header + content layout
-        let mut els = Elements::new();
-        els.add(TextBlock::new().line(&self.title, heading_style));
-        if let Some(children) = slot {
-            els.group(children); // slot children go here
-        }
-        Some(els)
-    }
-
-    fn content_inset(&self, _state: &()) -> Insets {
-        Insets::all(1) // border chrome
-    }
-
-    // render() draws the border, children render inside the inset
-    # fn render(&self, _: Rect, _: &mut Buffer, _: &()) {}
-    # fn desired_height(&self, _: u16, _: &()) -> u16 { 0 }
-}
-```
-
-Three patterns:
-- **Pass through** (default) — VStack, HStack accept external children as-is
-- **Generate own tree** — a Spinner builds its own frame + label layout
-- **Wrap slot** — a Card wraps external children in a header + border
-
 ### Committed Scrollback
 
 For long-running apps, content that scrolls into terminal scrollback can be evicted from state via an `on_commit` callback:
@@ -223,6 +251,28 @@ Application::builder()
 
 This is an opt-in performance optimization. Without it, the framework handles all content normally.
 
+## Imperative API
+
+For cases where you need direct control over the render loop (sync event loops, embedding in other frameworks), use `InlineRenderer` directly:
+
+```rust
+let mut renderer = InlineRenderer::new(width);
+let id = renderer.push(Spinner::new("Loading..."));
+
+// Mutate state, render, write to stdout
+renderer.state_mut::<Spinner>(id).tick();
+let output = renderer.render();
+stdout.write_all(&output)?;
+
+// Rebuild with element! for declarative subtrees
+let container = renderer.push(VStack);
+renderer.rebuild(container, element! {
+    TextBlock(lines: vec![("Hello".into(), Style::default())])
+});
+```
+
+See the `terminal_demo` and `lifecycle` examples for complete sync event loop patterns.
+
 ## Built-in Components
 
 | Component | Description |
@@ -236,20 +286,26 @@ This is an opt-in performance optimization. Without it, the framework handles al
 ## Examples
 
 ```sh
-cargo run --example chat          # Interactive chat assistant with streaming
-cargo run --example app           # Application wrapper with Handle updates
-cargo run --example declarative   # View function pattern
-cargo run --example lifecycle     # Mount/unmount lifecycle hooks
+cargo run --example chat            # Interactive chat with streaming
+cargo run --example app             # Application wrapper with Handle updates
+cargo run --example declarative     # View function pattern with element! macro
+cargo run --example lifecycle       # Mount/unmount lifecycle hooks
+cargo run --example interactive     # Focus, Tab cycling, text input
+cargo run --example terminal_demo   # Sync imperative API with InlineRenderer
+cargo run --example agent_sim       # Multi-component agent simulation
+cargo run --example markdown_demo   # Markdown rendering showcase
+cargo run --example growing         # Dynamically growing content
+cargo run --example nested          # Nested component trees
+cargo run --example wrapping        # Word wrapping and resize behavior
 ```
 
 ## Architecture
 
 ```
-Application          State + view function + async event loop
-  Renderer           Node arena, reconciliation, layout, effects
-    InlineRenderer   Terminal output, frame diffing, scrollback
-      ratatui-core   Buffer, Cell, Style, Widget primitives
-        crossterm    Terminal I/O, event types
+Application        State + view function + async event loop
+  InlineRenderer   Rendering, reconciliation, layout, diffing, scrollback
+    ratatui-core   Buffer, Cell, Style, Widget primitives
+    crossterm      Terminal I/O, event types
 ```
 
 ### Inline rendering model

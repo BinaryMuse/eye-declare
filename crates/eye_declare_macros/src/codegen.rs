@@ -102,16 +102,14 @@ fn generate_component(
     props: &[Prop],
     children: Option<&[Node]>,
 ) -> TokenStream {
-    // Separate special props (key, width) from struct fields
+    // Separate special props (key) from struct fields
     let mut key_expr: Option<&syn::Expr> = None;
-    let mut width_expr: Option<&syn::Expr> = None;
     let mut field_props: Vec<&Prop> = Vec::new();
 
     for prop in props {
         let name = prop.name.to_string();
         match name.as_str() {
             "key" => key_expr = Some(&prop.value),
-            "width" => width_expr = Some(&prop.value),
             _ => field_props.push(prop),
         }
     }
@@ -156,11 +154,10 @@ fn generate_component(
 
     // Apply special props
     let key_call = key_expr.map(|k| quote! { .key(#k) });
-    let width_call = width_expr.map(|w| quote! { .width(#w) });
 
     quote! {
         {
-            #add_call #key_call #width_call;
+            #add_call #key_call;
         }
     }
 }
