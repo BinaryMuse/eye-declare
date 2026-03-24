@@ -8,7 +8,7 @@
 use std::io;
 use std::time::Duration;
 
-use eye_declare::{Application, Elements, Spinner, TextBlock};
+use eye_declare::{Application, Elements, Spinner, TextBlock, element};
 use ratatui_core::style::{Color, Modifier, Style};
 
 // ---------------------------------------------------------------------------
@@ -21,17 +21,14 @@ struct AppState {
 }
 
 fn app_view(state: &AppState) -> Elements {
-    let mut els = Elements::new();
-
-    for (text, style) in &state.messages {
-        els.add(TextBlock::new().line(text.as_str(), *style));
+    element! {
+        #(for (text, style) in &state.messages {
+            TextBlock(lines: [(text.clone(), style.clone())]) {}
+        })
+        #(if state.thinking {
+            Spinner(label: "Processing...")
+        })
     }
-
-    if state.thinking {
-        els.add(Spinner::new("Processing...")).key("spinner");
-    }
-
-    els
 }
 
 // ---------------------------------------------------------------------------
@@ -83,6 +80,7 @@ async fn main() -> io::Result<()> {
                 "✓ Background work complete".into(),
                 Style::default().fg(Color::Green),
             ));
+            s.messages.push(("".into(), Style::default()));
         });
 
         // handle dropped here → app exits when effects stop
