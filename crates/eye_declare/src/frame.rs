@@ -45,20 +45,35 @@ impl Frame {
             };
         }
 
-        // Heights differ — we need matching buffers for diff.
-        // Create padded versions at the max dimensions.
+        // Heights differ — compare directly without allocating padded buffers.
+        // Cells within both buffers are compared normally; cells only in one
+        // buffer are compared against a default (empty) cell.
         let max_width = new_area.width.max(prev_area.width);
         let max_height = new_area.height.max(prev_area.height);
-        let max_rect = Rect::new(0, 0, max_width, max_height);
+        let default_cell = Cell::default();
+        let mut changes = Vec::new();
 
-        let padded_prev = pad_buffer(&previous.buffer, max_rect);
-        let padded_new = pad_buffer(&self.buffer, max_rect);
+        for y in 0..max_height {
+            for x in 0..max_width {
+                let in_prev = x < prev_area.width && y < prev_area.height;
+                let in_new = x < new_area.width && y < new_area.height;
 
-        let changes = padded_prev
-            .diff(&padded_new)
-            .into_iter()
-            .map(|(x, y, cell)| (x, y, cell.clone()))
-            .collect();
+                let prev_cell = if in_prev {
+                    &previous.buffer[(x, y)]
+                } else {
+                    &default_cell
+                };
+                let new_cell = if in_new {
+                    &self.buffer[(x, y)]
+                } else {
+                    &default_cell
+                };
+
+                if prev_cell != new_cell {
+                    changes.push((x, y, new_cell.clone()));
+                }
+            }
+        }
 
         Diff {
             cells: changes,
@@ -66,23 +81,6 @@ impl Frame {
             prev_area,
         }
     }
-}
-
-/// Pad a buffer to a larger rect, copying existing cells and filling
-/// new space with default (empty) cells.
-fn pad_buffer(src: &Buffer, target_area: Rect) -> Buffer {
-    let mut padded = Buffer::empty(target_area);
-    let src_area = src.area;
-
-    for y in src_area.y..src_area.y.saturating_add(src_area.height) {
-        for x in src_area.x..src_area.x.saturating_add(src_area.width) {
-            if x < target_area.x + target_area.width && y < target_area.y + target_area.height {
-                padded[(x, y)] = src[(x, y)].clone();
-            }
-        }
-    }
-
-    padded
 }
 
 /// A set of changed cells between two frames.
