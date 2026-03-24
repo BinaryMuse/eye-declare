@@ -100,7 +100,7 @@ impl Component for Markdown {
 }
 
 /// Parse markdown source into styled ratatui Text.
-fn render_markdown<'a>(source: &str, styles: &MarkdownState) -> Text<'static> {
+fn render_markdown(source: &str, styles: &MarkdownState) -> Text<'static> {
     let mut lines: Vec<Line<'static>> = Vec::new();
     let mut in_code_block = false;
 
@@ -131,24 +131,21 @@ fn render_markdown<'a>(source: &str, styles: &MarkdownState) -> Text<'static> {
         }
 
         // Heading
-        if line.starts_with("### ") {
-            let content = &line[4..];
+        if let Some(content) = line.strip_prefix("### ") {
             lines.push(Line::from(Span::styled(
                 content.to_string(),
                 styles.heading_style,
             )));
             continue;
         }
-        if line.starts_with("## ") {
-            let content = &line[3..];
+        if let Some(content) = line.strip_prefix("## ") {
             lines.push(Line::from(Span::styled(
                 content.to_string(),
                 styles.heading_style,
             )));
             continue;
         }
-        if line.starts_with("# ") {
-            let content = &line[2..];
+        if let Some(content) = line.strip_prefix("# ") {
             lines.push(Line::from(Span::styled(
                 content.to_string(),
                 styles.heading_style.add_modifier(Modifier::UNDERLINED),

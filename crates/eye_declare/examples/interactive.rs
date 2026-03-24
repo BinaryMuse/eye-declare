@@ -132,7 +132,7 @@ impl Component for Input {
             return 1;
         }
         // Ceiling division
-        ((total_cols as u32 + width as u32 - 1) / width as u32) as u16
+        (total_cols as u32).div_ceil(width as u32) as u16
     }
 
     fn handle_event(&self, event: &Event, state: &mut Self::State) -> EventResult {

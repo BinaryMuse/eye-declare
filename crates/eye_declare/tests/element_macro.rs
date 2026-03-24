@@ -124,7 +124,7 @@ fn conditional_if_let() {
 
 #[test]
 fn for_loop() {
-    let items = vec!["alpha", "beta", "gamma"];
+    let items = ["alpha", "beta", "gamma"];
     let els = element! {
         #(for (i, item) in items.iter().enumerate() {
             Markdown(key: format!("item-{i}"), source: item.to_string())
@@ -158,7 +158,7 @@ fn nested_components() {
 
 #[test]
 fn mixed_content() {
-    let messages = vec!["hello".to_string(), "world".to_string()];
+    let messages = ["hello".to_string(), "world".to_string()];
     let thinking = true;
 
     let els = element! {

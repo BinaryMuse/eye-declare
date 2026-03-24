@@ -12,6 +12,10 @@ use crate::element::Elements;
 use crate::inline::InlineRenderer;
 use crate::node::NodeId;
 
+type StateUpdateFn<S> = Box<dyn FnOnce(&mut S) + Send>;
+type ViewFn<S> = Box<dyn Fn(&S) -> Elements>;
+type CommitCallbackFn<S> = Box<dyn FnMut(&CommittedElement, &mut S)>;
+
 /// Information about a committed element passed to the `on_commit` callback.
 #[derive(Debug, Clone)]
 pub struct CommittedElement {
@@ -45,7 +49,7 @@ pub enum ControlFlow {
 /// });
 /// ```
 pub struct Handle<S: Send + 'static> {
-    tx: mpsc::UnboundedSender<Box<dyn FnOnce(&mut S) + Send>>,
+    tx: mpsc::UnboundedSender<StateUpdateFn<S>>,
     exit: Arc<AtomicBool>,
 }
 
@@ -76,9 +80,9 @@ impl<S: Send + 'static> Clone for Handle<S> {
 /// Builder for configuring an [`Application`].
 pub struct ApplicationBuilder<S: Send + 'static> {
     state: Option<S>,
-    view_fn: Option<Box<dyn Fn(&S) -> Elements>>,
+    view_fn: Option<ViewFn<S>>,
     width: Option<u16>,
-    on_commit: Option<Box<dyn FnMut(&CommittedElement, &mut S)>>,
+    on_commit: Option<CommitCallbackFn<S>>,
 }
 
 impl<S: Send + 'static> ApplicationBuilder<S> {
@@ -179,12 +183,12 @@ impl<S: Send + 'static> ApplicationBuilder<S> {
 /// ```
 pub struct Application<S: Send + 'static> {
     state: S,
-    view_fn: Box<dyn Fn(&S) -> Elements>,
+    view_fn: ViewFn<S>,
     inline: InlineRenderer,
     container: NodeId,
     dirty: bool,
-    on_commit: Option<Box<dyn FnMut(&CommittedElement, &mut S)>>,
-    rx: mpsc::UnboundedReceiver<Box<dyn FnOnce(&mut S) + Send>>,
+    on_commit: Option<CommitCallbackFn<S>>,
+    rx: mpsc::UnboundedReceiver<StateUpdateFn<S>>,
     exit: Arc<AtomicBool>,
 }
 
@@ -387,11 +391,9 @@ impl<S: Send + 'static> Application<S> {
                         kind: KeyEventKind::Press,
                         ..
                     }) = &evt
-                    {
-                        if modifiers.contains(KeyModifiers::CONTROL) {
+                        && modifiers.contains(KeyModifiers::CONTROL) {
                             break;
                         }
-                    }
 
                     // Handle resize
                     if let Event::Resize(new_width, _) = &evt {
@@ -580,7 +582,7 @@ mod tests {
             .state(0u32)
             .view(|n: &u32| {
                 let mut els = Elements::new();
-                els.add(TextBlock::new().line(&format!("count: {}", n), Style::default()));
+                els.add(TextBlock::new().line(format!("count: {}", n), Style::default()));
                 els
             })
             .width(20)
@@ -688,7 +690,7 @@ mod tests {
             .state(0u32)
             .view(|n: &u32| {
                 let mut els = Elements::new();
-                els.add(TextBlock::new().line(&format!("count: {}", n), Style::default()));
+                els.add(TextBlock::new().line(format!("count: {}", n), Style::default()));
                 els
             })
             .width(20)
@@ -776,7 +778,7 @@ mod tests {
             .state(0u32)
             .view(|n: &u32| {
                 let mut els = Elements::new();
-                els.add(TextBlock::new().line(&format!("count: {}", n), Style::default()));
+                els.add(TextBlock::new().line(format!("count: {}", n), Style::default()));
                 els
             })
             .width(20)

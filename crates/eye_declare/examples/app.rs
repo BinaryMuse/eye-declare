@@ -23,7 +23,7 @@ struct AppState {
 fn app_view(state: &AppState) -> Elements {
     element! {
         #(for (text, style) in &state.messages {
-            TextBlock(lines: [(text.clone(), style.clone())]) {}
+            TextBlock(lines: [(text.clone(), *style)]) {}
         })
         #(if state.thinking {
             Spinner(label: "Processing...")

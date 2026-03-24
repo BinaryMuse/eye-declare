@@ -211,9 +211,8 @@ impl InlineRenderer {
             // Emit newlines to claim rows (minus 1 because the cursor
             // is already on the first row)
             if new_height > 0 {
-                for _ in 0..new_height.saturating_sub(1) {
-                    output.push(b'\n');
-                }
+                let newline_count = new_height.saturating_sub(1) as usize;
+                output.resize(output.len() + newline_count, b'\n');
                 self.emitted_rows = new_height;
             }
 
@@ -260,9 +259,7 @@ impl InlineRenderer {
             self.cursor.col = 0;
 
             // Emit newlines to claim new rows
-            for _ in 0..growth {
-                output.push(b'\n');
-            }
+            output.resize(output.len() + growth as usize, b'\n');
             self.emitted_rows += growth;
             self.cursor.row += growth;
         }

@@ -324,19 +324,7 @@ fn tokenize(text: &str) -> Vec<String> {
     let mut tokens = Vec::new();
     let mut chars = text.chars().peekable();
     while let Some(c) = chars.next() {
-        if c == ' ' || c == '\n' {
-            let mut token = String::new();
-            token.push(c);
-            for _ in 0..4 {
-                if let Some(&next) = chars.peek() {
-                    if next == ' ' || next == '\n' {
-                        break;
-                    }
-                    token.push(chars.next().unwrap());
-                }
-            }
-            tokens.push(token);
-        } else if tokens.is_empty() {
+        if c == ' ' || c == '\n' || tokens.is_empty() {
             let mut token = String::new();
             token.push(c);
             for _ in 0..4 {

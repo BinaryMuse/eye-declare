@@ -377,11 +377,9 @@ impl Renderer {
                     last_tick,
                     interval,
                 } = &effect.kind
-                {
-                    if now.duration_since(*last_tick) >= *interval {
+                    && now.duration_since(*last_tick) >= *interval {
                         due.push((id, idx));
                     }
-                }
             }
         }
 

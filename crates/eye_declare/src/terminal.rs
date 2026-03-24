@@ -216,11 +216,9 @@ impl Terminal {
                 kind: KeyEventKind::Press,
                 ..
             }) = &evt
-            {
-                if modifiers.contains(KeyModifiers::CONTROL) {
+                && modifiers.contains(KeyModifiers::CONTROL) {
                     break;
                 }
-            }
 
             // Handle resize
             if let Event::Resize(new_width, _) = &evt {

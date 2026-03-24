@@ -117,7 +117,7 @@ impl Component for Input {
         if total == 0 {
             return 1;
         }
-        ((total as u32 + width as u32 - 1) / width as u32).max(1) as u16
+        (total as u32).div_ceil(width as u32).max(1) as u16
     }
 
     fn handle_event(&self, event: &Event, state: &mut Self::State) -> EventResult {
