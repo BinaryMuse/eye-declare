@@ -693,33 +693,37 @@ impl Renderer {
     }
 
     /// Recursively measure the height of a node and its children.
-    fn measure_height(&self, id: NodeId, width: u16) -> u16 {
+    ///
+    /// Caches the result in `node.last_height` so that `render_node`
+    /// can read it without re-measuring.
+    fn measure_height(&mut self, id: NodeId, width: u16) -> u16 {
         let node = &self.nodes[id.0];
 
         if node.frozen {
             return node.last_height.unwrap_or(0);
         }
 
-        if node.is_container() {
+        let height = if node.is_container() {
             let insets = node
                 .component
                 .content_inset_erased(node.state.inner_as_any());
             let inner_width = width.saturating_sub(insets.horizontal());
 
-            let children_height = match node.layout {
-                Layout::Vertical => node
-                    .children
+            let children: Vec<NodeId> = node.children.clone();
+            let layout = node.layout;
+
+            let children_height = match layout {
+                Layout::Vertical => children
                     .iter()
                     .map(|&child| self.measure_height(child, inner_width))
                     .sum(),
                 Layout::Horizontal => {
-                    let constraints: Vec<WidthConstraint> = node
-                        .children
+                    let constraints: Vec<WidthConstraint> = children
                         .iter()
                         .map(|&cid| self.nodes[cid.0].width_constraint)
                         .collect();
                     let widths = allocate_widths(&constraints, inner_width);
-                    node.children
+                    children
                         .iter()
                         .zip(widths.iter())
                         .map(|(&child, &w)| self.measure_height(child, w))
@@ -733,7 +737,10 @@ impl Renderer {
             // Leaf: ask the component
             let state = node.state.inner_as_any();
             node.component.desired_height_erased(width, state)
-        }
+        };
+
+        self.nodes[id.0].last_height = Some(height);
+        height
     }
 
     /// Recursively render a node and its children into the buffer.
@@ -782,7 +789,9 @@ impl Renderer {
                 Layout::Vertical => {
                     let mut y_offset = inner.y;
                     for child_id in &children {
-                        let child_height = self.measure_height(*child_id, inner.width);
+                        // Use cached height from measure pass
+                        let child_height =
+                            self.nodes[child_id.0].last_height.unwrap_or(0);
                         if child_height == 0 {
                             continue;
                         }
