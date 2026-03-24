@@ -1,12 +1,12 @@
-# eye_declare
+# eye-declare
 
 A declarative inline TUI rendering library for Rust, built on [ratatui](https://ratatui.rs).
 
-eye_declare provides a React-like component model for building terminal UIs that render inline (growing into terminal scrollback) rather than taking over the full screen. Designed for CLI tools, AI assistants, and interactive prompts.
+eye-declare provides a React-like component model for building terminal UIs that render inline (growing into terminal scrollback) rather than taking over the full screen. Designed for CLI tools, AI assistants, and interactive prompts.
 
 ## Status
 
-eye_declare is in early development; expect breaking changes
+eye-declare is in early development; expect breaking changes
 
 ## Quick Start
 
@@ -217,7 +217,7 @@ Application          State + view function + async event loop
 
 ### Inline rendering model
 
-eye_declare uses an **inline rendering model** — content grows downward into the terminal's native scrollback, like standard CLI output. This is fundamentally different from full-screen TUI frameworks (ratatui's `Terminal`, tui-realm, cursive) that redraw a fixed viewport.
+eye-declare uses an **inline rendering model** — content grows downward into the terminal's native scrollback, like standard CLI output. This is fundamentally different from full-screen TUI frameworks (ratatui's `Terminal`, tui-realm, cursive) that redraw a fixed viewport.
 
 The tradeoff is deliberate. Inline rendering is the right model for AI assistants, build tools, and interactive prompts where output accumulates and earlier results should persist in scrollback for the user to review. Full-screen mode would erase that history.
 
