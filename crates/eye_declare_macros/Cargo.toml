@@ -1,6 +1,7 @@
 [package]
 name = "eye_declare_macros"
 description = "Macros for eye_declare"
+repository = "https://github.com/BinaryMuse/eye-declare"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
