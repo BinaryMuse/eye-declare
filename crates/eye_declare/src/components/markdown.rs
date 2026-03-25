@@ -9,21 +9,34 @@ use ratatui_core::{
 use crate::component::Component;
 use crate::wrap;
 
-/// A component that renders a subset of Markdown suitable for
-/// LLM/AI chat output.
+/// Renders a subset of Markdown as styled terminal text.
 ///
-/// The markdown source is a prop on the component. Style
-/// configuration lives in [`MarkdownState`].
+/// Supports headings (`#`, `##`, `###`), **bold**, *italic*, `inline code`,
+/// fenced code blocks, and unordered lists. Designed for rendering
+/// LLM/AI chat output in the terminal.
+///
+/// The markdown source is a prop; style configuration lives in
+/// [`MarkdownState`] (internal state with sensible defaults).
+///
+/// # Examples
 ///
 /// ```ignore
-/// Markdown::new("# Hello\n\nThis is **bold**.")
+/// // Constructor
+/// Markdown::new("# Hello\n\nThis is **bold** and `code`.")
+///
+/// // In the element! macro
+/// element! {
+///     Markdown(key: "response", source: response_text.clone())
+/// }
 /// ```
 #[derive(Default)]
 pub struct Markdown {
+    /// The markdown source text to render.
     pub source: String,
 }
 
 impl Markdown {
+    /// Create a new markdown component with the given source text.
     pub fn new(source: impl Into<String>) -> Self {
         Self {
             source: source.into(),
@@ -31,10 +44,14 @@ impl Markdown {
     }
 }
 
-/// State for a [`Markdown`] component.
+/// Style configuration for a [`Markdown`] component.
 ///
-/// Contains style configuration only. The markdown source text
-/// is a prop on the [`Markdown`] struct.
+/// Initialized with sensible terminal defaults (cyan headings, yellow
+/// inline code, green code blocks, etc.). Override individual fields
+/// to match your application's color scheme.
+///
+/// The markdown source text is a prop on the [`Markdown`] struct,
+/// not part of state.
 pub struct MarkdownState {
     /// Base style for normal text.
     pub base_style: Style,
@@ -53,6 +70,9 @@ pub struct MarkdownState {
 }
 
 impl MarkdownState {
+    /// Create the default style configuration: cyan bold headings, yellow
+    /// inline code, green code blocks, bold/italic modifiers, dark gray
+    /// list markers.
     pub fn new() -> Self {
         let base = Style::default();
         Self {

@@ -7,22 +7,33 @@ use crate::hooks::Hooks;
 use crate::insets::Insets;
 use crate::node::{Layout, WidthConstraint};
 
-/// Implement [`ChildCollector`] for a component that passes children
-/// through as slot children (like layout containers).
+/// Implement [`ChildCollector`](crate::ChildCollector) for a component so it accepts slot children in
+/// the `element!` macro.
+///
+/// Slot children are passed to the component's [`Component::children`] method as the
+/// `slot` parameter. Layout containers like [`VStack`] and [`HStack`] use this to
+/// accept arbitrary child elements.
+///
+/// # Example
 ///
 /// ```ignore
-/// use eye_declare::impl_slot_children;
-///
 /// #[derive(Default)]
-/// struct Card;
-/// impl Component for Card { /* ... */ }
-/// impl_slot_children!(Card);
-/// ```
+/// struct Card { pub title: String }
 ///
-/// This allows the component to accept children in the `element!` macro:
-/// ```ignore
+/// impl Component for Card {
+///     type State = ();
+///     fn render(&self, area: Rect, buf: &mut Buffer, _: &()) { /* draw border */ }
+///     fn desired_height(&self, _: u16, _: &()) -> u16 { 0 }
+///     fn children(&self, _: &(), slot: Option<Elements>) -> Option<Elements> {
+///         slot // pass children through
+///     }
+/// }
+///
+/// impl_slot_children!(Card);
+///
+/// // Now Card can accept children:
 /// element! {
-///     Card {
+///     Card(title: "My Card".into()) {
 ///         Spinner(label: "loading...")
 ///         "some text"
 ///     }
@@ -42,37 +53,55 @@ macro_rules! impl_slot_children {
     };
 }
 
-/// Result of handling an input event.
+/// Result of handling an input event in [`Component::handle_event`].
+///
+/// Controls whether the event continues bubbling up the component tree.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EventResult {
-    /// Event was consumed by this component.
+    /// The event was handled by this component. Stops propagation.
     Consumed,
-    /// Event was not handled; propagate to parent.
+    /// The event was not handled. The framework passes it to the parent.
     Ignored,
 }
 
-/// Wrapper that automatically marks state dirty on `&mut` access.
+/// Wrapper that automatically marks component state dirty on mutation.
 ///
-/// The framework wraps each component's state in `Tracked<S>`.
-/// Read access (`Deref`) does not set dirty. Write access (`DerefMut`)
-/// sets the dirty flag, so the framework knows to re-render.
+/// The framework wraps each component's `State` in `Tracked<S>`.
+/// Read access via [`Deref`] is free — it does not set the dirty flag.
+/// Write access via [`DerefMut`] automatically marks the state dirty,
+/// telling the framework this component needs to re-render.
+///
+/// You will interact with `Tracked` when using the imperative
+/// [`InlineRenderer`](crate::InlineRenderer) API:
+///
+/// ```ignore
+/// let id = renderer.push(Spinner::new("loading..."));
+///
+/// // DerefMut triggers dirty flag automatically
+/// renderer.state_mut::<Spinner>(id).tick();
+/// ```
+///
+/// Inside [`Component::handle_event`] and lifecycle hooks, the framework
+/// provides the inner `State` directly — `Tracked` is transparent.
 pub struct Tracked<S> {
     inner: S,
     dirty: bool,
 }
 
 impl<S> Tracked<S> {
+    /// Wrap a value in dirty-tracking. Starts dirty so the first render
+    /// always happens.
     pub fn new(inner: S) -> Self {
-        Self {
-            inner,
-            dirty: true, // start dirty so first render always happens
-        }
+        Self { inner, dirty: true }
     }
 
+    /// Whether the inner value has been mutated since the last
+    /// [`clear_dirty`](Tracked::clear_dirty) call.
     pub fn is_dirty(&self) -> bool {
         self.dirty
     }
 
+    /// Reset the dirty flag. Called by the framework after rendering.
     pub fn clear_dirty(&mut self) {
         self.dirty = false;
     }
@@ -95,8 +124,47 @@ impl<S> DerefMut for Tracked<S> {
 
 /// A component that can render itself into a terminal region.
 ///
-/// Components are stateless renderers — state lives in the associated
-/// `State` type, managed by the framework via [`Tracked<S>`].
+/// This is the core trait of eye_declare. Components separate **props**
+/// (data on `&self`, set by the parent, immutable) from **state** (the
+/// associated `State` type, framework-managed via [`Tracked`]).
+///
+/// # Minimal implementation
+///
+/// ```ignore
+/// use eye_declare::Component;
+/// use ratatui_core::{buffer::Buffer, layout::Rect, widgets::Widget};
+/// use ratatui_widgets::paragraph::Paragraph;
+///
+/// #[derive(Default)]
+/// struct Badge { pub label: String }
+///
+/// impl Component for Badge {
+///     type State = ();
+///
+///     fn render(&self, area: Rect, buf: &mut Buffer, _state: &()) {
+///         Paragraph::new(self.label.as_str()).render(area, buf);
+///     }
+///
+///     fn desired_height(&self, _width: u16, _state: &()) -> u16 { 1 }
+/// }
+/// ```
+///
+/// # Children and composition
+///
+/// Components that generate their own child trees override [`children`](Component::children).
+/// The `slot` parameter carries externally-provided children (from the
+/// `element!` macro's brace syntax). See the three patterns:
+///
+/// - **Pass through** — return `slot` unchanged (default). Layout containers
+///   like [`VStack`] do this.
+/// - **Generate own tree** — ignore `slot`, return a custom [`Elements`].
+/// - **Wrap slot** — incorporate `slot` into a larger tree with headers,
+///   borders, etc.
+///
+/// # Lifecycle
+///
+/// Override [`lifecycle`](Component::lifecycle) to declare effects via [`Hooks`]:
+/// intervals, mount/unmount handlers, and autofocus requests.
 pub trait Component: Send + Sync + 'static {
     /// State type for this component. The framework wraps it in
     /// `Tracked<S>` for automatic dirty detection.
@@ -206,10 +274,23 @@ pub trait Component: Send + Sync + 'static {
     }
 }
 
-/// A no-op container component for vertical stacking.
+/// Vertical stack container — children render top-to-bottom.
 ///
-/// VStack renders nothing itself — children determine all sizing
-/// and content. Used as the implicit root component of a Renderer.
+/// `VStack` renders nothing itself; it exists purely to group children.
+/// Each child receives the full parent width and its own
+/// [`desired_height`](Component::desired_height).
+///
+/// This is the default layout direction and the implicit root of every
+/// renderer. Use it explicitly when you need a named group:
+///
+/// ```ignore
+/// element! {
+///     VStack {
+///         Spinner(label: "Step 1...")
+///         Spinner(label: "Step 2...")
+///     }
+/// }
+/// ```
 #[derive(Default)]
 pub struct VStack;
 
@@ -225,12 +306,26 @@ impl Component for VStack {
 
 impl_slot_children!(VStack);
 
-/// A no-op container component for horizontal layout.
+/// Horizontal stack container — children render left-to-right.
 ///
-/// HStack renders nothing itself — children are laid out
-/// left-to-right with widths determined by their
-/// [`WidthConstraint`](crate::node::WidthConstraint).
-/// The layout direction is set on the Node by the element builder.
+/// `HStack` renders nothing itself; it lays children out horizontally.
+/// Each child's width is determined by its [`WidthConstraint`]:
+/// [`Fixed(n)`](WidthConstraint::Fixed) reserves exactly `n` columns,
+/// while [`Fill`](WidthConstraint::Fill) (the default) splits remaining
+/// space equally among all `Fill` siblings.
+///
+/// ```ignore
+/// element! {
+///     HStack {
+///         Column(width: Fixed(3)) {
+///             Spinner(label: "")
+///         }
+///         Column {
+///             "Status: OK"
+///         }
+///     }
+/// }
+/// ```
 #[derive(Default)]
 pub struct HStack;
 
@@ -250,24 +345,27 @@ impl Component for HStack {
 
 impl_slot_children!(HStack);
 
-/// A container for a single child within an [`HStack`], with a width constraint.
+/// A width-constrained wrapper for children inside an [`HStack`].
 ///
-/// Column renders nothing itself — it passes children through and
-/// declares its width via [`Component::width_constraint`].
+/// `Column` renders nothing itself — it passes children through and
+/// declares a [`WidthConstraint`] that the `HStack` uses for layout.
+/// Defaults to [`Fill`](WidthConstraint::Fill) if no width is specified.
 ///
 /// ```ignore
 /// element! {
 ///     HStack {
-///         Column(width: Fixed(2)) {
-///             Spinner(label: "loading")
+///         Column(width: Fixed(20)) {
+///             "Sidebar"
 ///         }
 ///         Column {
-///             TextBlock { Line { Span(text: "hello") } }
+///             // Fill: takes remaining width
+///             "Main content"
 ///         }
 ///     }
 /// }
 /// ```
 pub struct Column {
+    /// The width constraint for this column. Defaults to [`Fill`](WidthConstraint::Fill).
     pub width: WidthConstraint,
 }
 

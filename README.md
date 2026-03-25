@@ -2,7 +2,7 @@
 
 A declarative inline TUI rendering library for Rust, built on [Ratatui](https://ratatui.rs).
 
-eye-declare provides a React-like component model for building terminal UIs that render inline (growing into terminal scrollback) rather than taking over the full screen. Designed for CLI tools, AI assistants, and interactive prompts.
+eye-declare provides a React-like component model for building terminal UIs that render **inline** — content grows into the terminal's native scrollback rather than taking over the full screen. Designed for CLI tools, AI assistants, and interactive prompts where output accumulates and earlier results should remain visible.
 
 ![Demo](https://github.com/BinaryMuse/eye-declare/blob/main/assets/demo.gif?raw=true)
 
@@ -18,8 +18,7 @@ Coming changes:
 ## Quick Start
 
 ```rust
-use eye_declare::{element, Application, Elements, Spinner, TextBlock};
-use ratatui_core::style::Style;
+use eye_declare::{element, Application, ControlFlow, Elements, Spinner, TextBlock};
 
 struct AppState {
     messages: Vec<String>,
@@ -29,9 +28,11 @@ struct AppState {
 fn chat_view(state: &AppState) -> Elements {
     element! {
         #(for (i, msg) in state.messages.iter().enumerate() {
-            TextBlock(key: format!("msg-{i}"), lines: vec![
-                (msg.clone(), Style::default())
-            ])
+            TextBlock {
+                Line {
+                    Span(text: msg.clone())
+                }
+            }
         })
         #(if state.thinking {
             Spinner(key: "thinking", label: "Thinking...")
@@ -63,7 +64,7 @@ The `element!` macro is the primary way to build UIs. It provides JSX-like synta
 fn dashboard(state: &DashboardState) -> Elements {
     element! {
         VStack {
-            TextBlock(lines: vec![("Dashboard".into(), bold_style)])
+            "Dashboard"
 
             #(for (i, item) in state.items.iter().enumerate() {
                 Markdown(key: format!("item-{i}"), source: item.clone())
@@ -74,7 +75,7 @@ fn dashboard(state: &DashboardState) -> Elements {
             })
 
             #(if let Some(ref err) = state.error {
-                TextBlock(lines: vec![(err.clone(), error_style)])
+                Markdown(source: err.clone())
             })
 
             #(footer_view(state))
@@ -83,19 +84,28 @@ fn dashboard(state: &DashboardState) -> Elements {
 }
 ```
 
-- **Props** are set as `Component(prop: value, ...)` — these are struct fields on the component
-- **Children** go inside braces: `VStack { ... }`
-- **Keys** provide stable identity across rebuilds: `Spinner(key: "s", label: "...")`
-- **String literals** are auto-wrapped as `TextBlock`: `"hello"` becomes a single-line text block
-- **Control flow** uses `#(if)`, `#(if let)`, and `#(for)` for conditional and repeated elements
-- **Splice** interpolates pre-built `Elements` inline: `#(sub_view(state))`
+### Syntax reference
+
+| Syntax | Description |
+|--------|-------------|
+| `Component(prop: value)` | Construct with props (struct field init) |
+| `Component { ... }` | Component with children |
+| `Component(props) { children }` | Both |
+| `"text"` | String literal — auto-wrapped as `TextBlock` |
+| `key: expr` | Special prop for stable identity across rebuilds |
+| `#(if cond { ... })` | Conditional children |
+| `#(if let pat = expr { ... })` | Pattern-matching conditional |
+| `#(for pat in iter { ... })` | Loop children |
+| `#(expr)` | Splice a pre-built `Elements` value inline |
 
 ## Components
 
-Components are the building blocks. Props live on `&self` (immutable, set by parent). Internal state lives in `State` (mutable, framework-managed via dirty tracking).
+Components are the building blocks. Props live on `&self` (immutable, set by parent). Internal state lives in the associated `State` type (mutable, framework-managed via automatic dirty tracking).
 
 ```rust
 use eye_declare::Component;
+use ratatui_core::{buffer::Buffer, layout::Rect, style::Style, widgets::Widget};
+use ratatui_widgets::paragraph::Paragraph;
 
 #[derive(Default)]
 struct StatusBadge {
@@ -104,7 +114,7 @@ struct StatusBadge {
 }
 
 impl Component for StatusBadge {
-    type State = (); // no internal state
+    type State = (); // no internal state needed
 
     fn render(&self, area: Rect, buf: &mut Buffer, _state: &()) {
         let line = Line::from(Span::styled(&self.label, Style::default().fg(self.color)));
@@ -119,13 +129,13 @@ Then use it in a view:
 
 ```rust
 element! {
-    StatusBadge(label: "Online".into(), color: Color::Green)
+    StatusBadge(label: "Online", color: Color::Green)
 }
 ```
 
 ### Composite Components
 
-Components can generate their own child trees via the `children()` method. The `slot` parameter carries externally-provided children (like React's `props.children`), letting components wrap, replace, or pass through content:
+Components can generate child trees via the `children()` method. The `slot` parameter carries externally-provided children (like React's `props.children`):
 
 ```rust
 #[derive(Default)]
@@ -146,15 +156,14 @@ impl Component for Card {
     }
 
     fn content_inset(&self, _state: &()) -> Insets {
-        Insets::all(1) // border chrome
+        Insets::all(1) // 1-cell border chrome
     }
 
     fn render(&self, area: Rect, buf: &mut Buffer, _state: &()) {
-        // draw border chrome; children render inside the inset
+        // draw border chrome; children render inside the inset area
     }
 
-    // ignored for containers (height is computed from children + insets)
-    fn desired_height(&self, _: u16, _: &()) -> u16 { 0 }
+    fn desired_height(&self, _: u16, _: &()) -> u16 { 0 } // ignored for containers
 }
 ```
 
@@ -162,7 +171,7 @@ Usage with `element!`:
 
 ```rust
 element! {
-    Card(title: "My Card".into()) {
+    Card(title: "My Card") {
         Spinner(label: "Loading...")
         "Some content"
     }
@@ -170,16 +179,18 @@ element! {
 ```
 
 Three patterns:
-- **Pass through** (default); ex: VStack, HStack accept external children as-is
-- **Generate own tree**; ex: a Spinner builds its own frame + label layout
-- **Wrap slot**; ex: a Card wraps external children in a header + border
+- **Pass through** (default) — VStack, HStack accept external children as-is
+- **Generate own tree** — a Spinner builds its own frame + label layout internally
+- **Wrap slot** — a Card wraps external children in a header + border
 
 ### Lifecycle Hooks
 
-Components declare effects via `lifecycle()`. The framework manages registration and cleanup.
+Components declare effects via `lifecycle()`. The framework manages registration and cleanup:
 
 ```rust
 impl Component for Timer {
+    type State = TimerState;
+
     fn lifecycle(&self, hooks: &mut Hooks<TimerState>, _state: &TimerState) {
         if self.running {
             hooks.use_interval(Duration::from_secs(1), |s| s.elapsed += 1);
@@ -187,24 +198,60 @@ impl Component for Timer {
         hooks.use_mount(|s| s.started_at = Instant::now());
         hooks.use_unmount(|s| println!("Timer ran for {:?}", s.started_at.elapsed()));
     }
+
+    // ...
 }
 ```
 
+Available hooks:
+
+| Hook | Fires when |
+|------|------------|
+| `use_interval(duration, handler)` | Periodically, at the given duration |
+| `use_mount(handler)` | Once, after the component is first built |
+| `use_unmount(handler)` | Once, when the component is removed |
+| `use_autofocus()` | Requests focus when the component mounts |
+
 ## Layout
 
-Vertical stacking is the default. `HStack` provides horizontal layout, and children declare width constraints via the imperative API:
+Vertical stacking is the default. `HStack` provides horizontal layout with width constraints:
 
 ```rust
-let mut els = Elements::new();
-els.add(TextBlock::new().lines(sidebar)).width(WidthConstraint::Fixed(20));
-els.add(TextBlock::new().lines(content)); // Fill (takes remaining space)
+use eye_declare::{Elements, HStack, Column, TextBlock};
+use eye_declare::WidthConstraint::Fixed;
+
+fn two_column_view(state: &MyState) -> Elements {
+    element! {
+        HStack {
+            Column(width: Fixed(20)) {
+                TextBlock {
+                    #(for line in state.lines {
+                        Line {
+                            Span(text: line)
+                        }
+                    })
+                }
+            }
+            Column {
+                // Fill: takes remaining space
+                TextBlock {
+                    #(for line in state.content_lines {
+                        Line {
+                            Span(text: line)
+                        }
+                    })
+                }
+            }
+        }
+    }
+}
 ```
 
 Components can declare `content_inset()` for borders and padding — children render inside the inset area while the component draws chrome in the full area.
 
 ## Reconciliation
 
-Elements are matched by key (stable identity) or position (implicit). State is preserved across rebuilds when nodes are reused.
+Elements are matched by key (stable identity) or position (implicit). State is preserved across rebuilds when nodes are reused:
 
 ```rust
 element! {
@@ -220,7 +267,7 @@ element! {
 
 ## Application
 
-`Application` owns your state and manages the render loop. `Handle` sends updates from any thread or async task.
+`Application` owns your state and manages the render loop. `Handle` sends updates from any thread or async task:
 
 ```rust
 let (mut app, handle) = Application::builder()
@@ -230,7 +277,9 @@ let (mut app, handle) = Application::builder()
 
 // Non-interactive: exits when handle is dropped and effects stop
 app.run().await?;
+```
 
+```rust
 // Interactive: raw mode, event handling, Ctrl+C
 app.run_interactive(|event, state| {
     // handle terminal events, mutate state
@@ -248,8 +297,9 @@ For long-running apps, content that scrolls into terminal scrollback can be evic
 Application::builder()
     .state(state)
     .view(view)
-    .on_commit(|_committed, state| {
-        state.messages.remove(0); // evict from front
+    .on_commit(|committed, state| {
+        // `committed.key` identifies which element scrolled off
+        state.messages.remove(0);
     })
     .build()?;
 ```
@@ -258,21 +308,24 @@ This is an opt-in performance optimization. Without it, the framework handles al
 
 ## Imperative API
 
-For cases where you need direct control over the render loop (sync event loops, embedding in other frameworks), use `InlineRenderer` directly:
+For direct control over the render loop, use `InlineRenderer`:
 
 ```rust
+use eye_declare::{InlineRenderer, Spinner, VStack, TextBlock};
+
 let mut renderer = InlineRenderer::new(width);
-let id = renderer.push(Spinner::new("Loading..."));
+let spinner_id = renderer.push(Spinner::new("Loading..."));
 
 // Mutate state, render, write to stdout
-renderer.state_mut::<Spinner>(id).tick();
+std::thread::sleep(Duration::from_millis(100));
+renderer.tick();
 let output = renderer.render();
 stdout.write_all(&output)?;
 
-// Rebuild with element! for declarative subtrees
+// Declarative subtrees via rebuild
 let container = renderer.push(VStack);
 renderer.rebuild(container, element! {
-    TextBlock(lines: vec![("Hello".into(), Style::default())])
+    "Hello"
 });
 ```
 
@@ -282,11 +335,11 @@ See the `terminal_demo` and `lifecycle` examples for complete sync event loop pa
 
 | Component | Description |
 |-----------|-------------|
-| `TextBlock` | Styled text with display-time word wrapping |
-| `Spinner` | Animated spinner with auto-tick via lifecycle hooks |
-| `Markdown` | Headings, bold, italic, code, lists, code blocks |
-| `VStack` | Vertical container (children stack top-to-bottom) |
-| `HStack` | Horizontal container with width constraints |
+| `TextBlock` | Styled text with display-time word wrapping. Supports `Line`/`Span` children for multi-styled lines. |
+| `Spinner` | Animated Braille spinner with auto-tick. Shows a checkmark when `.done()`. |
+| `Markdown` | Headings, bold, italic, inline code, code blocks, and lists. |
+| `VStack` | Vertical container — children stack top-to-bottom. |
+| `HStack` | Horizontal container — children lay left-to-right with `WidthConstraint`-based layout. |
 
 ## Examples
 
@@ -317,7 +370,7 @@ Application        State + view function + async event loop
 
 eye-declare uses an **inline rendering model** — content grows downward into the terminal's native scrollback, like standard CLI output. This is fundamentally different from full-screen TUI frameworks (ratatui's `Terminal`, tui-realm, cursive) that redraw a fixed viewport.
 
-The tradeoff is deliberate. Inline rendering is the right model for AI assistants, build tools, and interactive prompts where output accumulates and earlier results should persist in scrollback for the user to review. Full-screen mode would erase that history.
+The tradeoff is deliberate. Inline rendering is the right model for AI assistants, build tools, and interactive prompts where output accumulates and earlier results should persist in scrollback for the user to review.
 
 **How it works:**
 
@@ -329,11 +382,7 @@ The tradeoff is deliberate. Inline rendering is the right model for AI assistant
 
 4. **Growth** is handled by emitting newlines to claim new terminal rows before writing content. Old rows naturally scroll into terminal scrollback.
 
-**Scrollback handling:** When content height exceeds the terminal height, the terminal scrolls rows into scrollback. The framework tracks terminal height and filters diff output to only address visible rows, preventing cursor tracking drift. The `on_commit` callback provides an additional optimization by evicting committed content from application state entirely.
-
-### Design documents
-
-The `.planning/` directory contains the research and design documents that guided these decisions, including the target API design, event handling strategy, and implementation sequence.
+**Scrollback handling:** When content height exceeds the terminal height, the terminal scrolls rows into scrollback. The framework tracks terminal height and filters diff output to only address visible rows. The `on_commit` callback provides an additional optimization by evicting committed content from application state entirely.
 
 ## Crate Structure
 

@@ -1,33 +1,50 @@
 use proc_macro::TokenStream;
 
-/// Declarative element tree macro.
+/// Declarative element tree macro — the primary way to build UIs in eye_declare.
 ///
-/// Builds an `Elements` list from a JSX-like syntax:
+/// Returns an `Elements` list from JSX-like syntax. View functions typically
+/// return the result directly:
 ///
 /// ```ignore
-/// element! {
-///     VStack {
-///         Markdown(key: format!("msg-{i}"), source: msg)
-///         #(if state.thinking {
-///             Spinner(key: "thinking", label: "Thinking...")
-///         })
-///         "---"
+/// fn my_view(state: &AppState) -> Elements {
+///     element! {
+///         VStack {
+///             Markdown(key: format!("msg-{}", state.id), source: state.text.clone())
+///             #(if state.thinking {
+///                 Spinner(key: "thinking", label: "Thinking...")
+///             })
+///             "---"
+///         }
 ///     }
 /// }
 /// ```
 ///
-/// ## Syntax
+/// # Syntax reference
 ///
-/// - `Component(prop: val, key: "k")` — construct a component with props
-/// - `Component { ... }` — component with children (slot)
-/// - `Component(props) { children }` — both
-/// - `"text"` — shorthand for `TextBlock::new().unstyled("text")`
-/// - `#(if cond { ... })` — conditional children
-/// - `#(for pat in iter { ... })` — loop children
-/// - `#(expr)` — splice an `Elements` value inline
+/// | Syntax | Description |
+/// |--------|-------------|
+/// | `Component(prop: val)` | Construct with props (struct field init) |
+/// | `Component { ... }` | Component with children (slot or data) |
+/// | `Component(props) { children }` | Props and children |
+/// | `"text"` | String literal — auto-wrapped as `TextBlock` |
+/// | `#(if cond { ... })` | Conditional children |
+/// | `#(if let pat = expr { ... })` | Pattern-matching conditional |
+/// | `#(for pat in iter { ... })` | Loop children |
+/// | `#(expr)` | Splice a pre-built `Elements` value inline |
+///
+/// # Keys
 ///
 /// `key` is a special prop — it maps to `.key()` on the element handle,
-/// not a struct field. It provides stable identity for reconciliation.
+/// not a struct field. Keys provide stable identity for reconciliation:
+/// keyed elements survive reordering with their state preserved.
+///
+/// ```ignore
+/// element! {
+///     #(for (i, item) in items.iter().enumerate() {
+///         Markdown(key: format!("item-{i}"), source: item.clone())
+///     })
+/// }
+/// ```
 #[proc_macro]
 pub fn element(input: TokenStream) -> TokenStream {
     match element_impl(input.into()) {

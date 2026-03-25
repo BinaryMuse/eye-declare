@@ -27,31 +27,43 @@ type StateUpdateFn<S> = Box<dyn FnOnce(&mut S) + Send>;
 type ViewFn<S> = Box<dyn Fn(&S) -> Elements>;
 type CommitCallbackFn<S> = Box<dyn FnMut(&CommittedElement, &mut S)>;
 
-/// Information about a committed element passed to the `on_commit` callback.
+/// Information about an element that has scrolled into terminal scrollback.
+///
+/// Passed to the [`ApplicationBuilder::on_commit`] callback. Use the `key`
+/// field to identify which element was committed so you can evict the
+/// corresponding data from your application state.
 #[derive(Debug, Clone)]
 pub struct CommittedElement {
-    /// The element's explicit key, if one was set.
+    /// The element's explicit key, if one was set via `.key()` or the
+    /// `key:` prop in the `element!` macro.
     pub key: Option<String>,
-    /// The element's positional index among its siblings at the time
-    /// of commit (always 0 — elements are committed from the front).
+    /// The element's positional index among its siblings at the time of
+    /// commit. Elements are always committed front-to-back, so this is 0
+    /// for the first committed element in each batch.
     pub index: usize,
 }
 
-/// Controls whether the application event loop continues.
+/// Controls whether the [`Application`] event loop continues or stops.
+///
+/// Returned from the event handler passed to
+/// [`Application::run_interactive`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ControlFlow {
-    /// Continue running the event loop.
+    /// Keep the event loop running.
     Continue,
-    /// Exit the event loop.
+    /// Stop the event loop and return from `run_interactive`.
     Exit,
 }
 
-/// A handle for sending state updates to a running [`Application`]
-/// from other threads or async tasks.
+/// A thread-safe handle for sending state updates to a running [`Application`].
 ///
-/// `Handle` is `Send + Sync + Clone`. Clone it for each task
-/// that needs to send updates. Updates are applied on the next
-/// frame before rebuild.
+/// `Handle` is `Clone + Send + Sync`. Clone it freely and move clones into
+/// threads or async tasks. Updates are batched — multiple calls to
+/// [`update`](Handle::update) between frames are applied together before
+/// the next rebuild.
+///
+/// When all `Handle` clones are dropped and no lifecycle effects remain
+/// active, [`Application::run`] exits automatically.
 ///
 /// ```ignore
 /// let h = handle.clone();
@@ -89,6 +101,10 @@ impl<S: Send + 'static> Clone for Handle<S> {
 }
 
 /// Builder for configuring an [`Application`].
+///
+/// Created via [`Application::builder`]. Requires at minimum a
+/// [`state`](ApplicationBuilder::state) and a [`view`](ApplicationBuilder::view)
+/// function before calling [`build`](ApplicationBuilder::build).
 pub struct ApplicationBuilder<S: Send + 'static> {
     state: Option<S>,
     view_fn: Option<ViewFn<S>>,
@@ -174,23 +190,43 @@ impl<S: Send + 'static> ApplicationBuilder<S> {
     }
 }
 
-/// An application that owns state, a view function, and a renderer.
+/// The high-level application wrapper — owns state, a view function, and a renderer.
 ///
-/// Provides two usage modes:
+/// `Application` is the recommended entry point for most programs. It manages
+/// the render loop, processes [`Handle`] updates, ticks lifecycle effects,
+/// and handles terminal resize.
 ///
-/// **Framework-owned loop** via [`run()`](Application::run):
+/// # Two usage modes
+///
+/// **Non-interactive** — state changes flow entirely through the [`Handle`]:
+///
 /// ```ignore
 /// let (mut app, handle) = Application::builder()
 ///     .state(MyState::new())
 ///     .view(my_view)
 ///     .build()?;
 ///
-/// app.run(|event, state| {
+/// tokio::spawn(async move {
+///     handle.update(|s| s.done = true);
+///     // handle dropped → app exits when effects stop
+/// });
+///
+/// app.run().await?;
+/// ```
+///
+/// **Interactive** — terminal raw mode with event handling:
+///
+/// ```ignore
+/// app.run_interactive(|event, state| {
+///     // handle keyboard/mouse events, mutate state
 ///     ControlFlow::Continue
 /// }).await?;
 /// ```
 ///
-/// **Step API** for custom loops:
+/// # Step API
+///
+/// For custom event loops or embedding, use the step methods directly:
+///
 /// ```ignore
 /// app.update(|s| s.count += 1);
 /// app.tick();

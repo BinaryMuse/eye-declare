@@ -7,11 +7,39 @@ use crate::frame::Frame;
 use crate::node::NodeId;
 use crate::renderer::Renderer;
 
-/// Manages a growing inline region in the terminal.
+/// Low-level inline rendering engine.
 ///
-/// Content grows downward as components are added or their content expands.
-/// Old content scrolls into the terminal's native scrollback naturally.
-/// Output is produced as `Vec<u8>` escape sequences ready to write.
+/// `InlineRenderer` manages a growing region of terminal output. Content
+/// expands downward as components are added or grow taller; old content
+/// scrolls into the terminal's native scrollback naturally. Each call to
+/// [`render`](InlineRenderer::render) returns a `Vec<u8>` of ANSI escape
+/// sequences ready to write to stdout.
+///
+/// For most applications, the higher-level [`Application`](crate::Application)
+/// wrapper is more convenient. Use `InlineRenderer` when you need:
+///
+/// - A synchronous event loop
+/// - Integration with an existing framework
+/// - Fine-grained control over when rendering happens
+///
+/// # Example
+///
+/// ```ignore
+/// use eye_declare::{InlineRenderer, Spinner};
+/// use std::io::Write;
+///
+/// let mut renderer = InlineRenderer::new(80);
+/// let id = renderer.push(Spinner::new("Working..."));
+///
+/// // Render loop
+/// loop {
+///     renderer.tick();
+///     let output = renderer.render();
+///     std::io::stdout().write_all(&output)?;
+///     std::io::stdout().flush()?;
+///     std::thread::sleep(std::time::Duration::from_millis(16));
+/// }
+/// ```
 pub struct InlineRenderer {
     renderer: Renderer,
     cursor: CursorState,
@@ -164,18 +192,14 @@ impl InlineRenderer {
     /// Handle a terminal resize.
     ///
     /// After a width change, the terminal has already reflowed existing
-    /// content, making our cursor tracking invalid. This clears the
-    /// visible screen (preserving scrollback), homes the cursor, and
-    /// does a full re-render at the new width.
+    /// content, making cursor tracking invalid. This clears the visible
+    /// screen (preserving scrollback), homes the cursor, and does a full
+    /// re-render at the new width.
     ///
     /// Scrollback content from before the resize stays at the old
-    /// wrapping — this is the same tradeoff pi-tui and Codex tui2 make.
-    ///
-    /// Note: A smoother resize experience is possible when a host like
-    /// Atuin Hex is available. Hex's shadow vt100 parser knows the actual
-    /// post-reflow terminal state, so it can diff against eye_declare's
-    /// fresh render and write only changed cells — no screen clear needed.
-    /// For standalone use (no host), this clear-and-redraw is the fallback.
+    /// wrapping. A host application with its own terminal state tracking
+    /// can avoid the screen clear by diffing against its known state;
+    /// this clear-and-redraw is the standalone fallback.
     ///
     /// Returns escape sequences to write to the terminal.
     pub fn resize(&mut self, new_width: u16) -> Vec<u8> {

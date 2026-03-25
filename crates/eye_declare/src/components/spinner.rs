@@ -14,24 +14,51 @@ use crate::hooks::Hooks;
 
 const FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
-/// A built-in animated spinner component with a label.
+/// An animated Braille spinner with a text label.
 ///
-/// Label and done state are props on the component itself.
-/// Animation frame and styles are internal state.
+/// The spinner animates automatically via a lifecycle interval — no manual
+/// ticking is needed when used with [`Application`](crate::Application).
+/// When `done` is set, the spinner shows a checkmark instead of animating.
+///
+/// # Examples
 ///
 /// ```ignore
+/// // Basic spinner
 /// Spinner::new("Loading...")
-/// Spinner::new("Done").done("Completed!")
+///
+/// // Spinner that shows a completion label when done
+/// Spinner::new("Compiling").done("Build complete!")
+///
+/// // In the element! macro
+/// element! {
+///     Spinner(key: "fetch", label: "Fetching data...".into())
+/// }
 /// ```
+///
+/// # Customization
+///
+/// All visual aspects are configurable via struct fields:
+/// `label_style`, `spinner_style`, `done_label_style`, `checkmark_style`,
+/// `label_first` (swap label/spinner order), and `hide_checkmark`.
 pub struct Spinner {
+    /// Text displayed next to the spinner animation.
     pub label: String,
+    /// When `true`, the spinner stops animating and shows a checkmark.
     pub done: bool,
+    /// Replacement label shown in the done state. Falls back to `label`
+    /// if `None`.
     pub done_label: Option<String>,
+    /// Hide the checkmark symbol in the done state.
     pub hide_checkmark: bool,
+    /// Place the label before the spinner/checkmark instead of after.
     pub label_first: bool,
+    /// Style for the label text while spinning.
     pub label_style: Style,
+    /// Style for the label text in the done state.
     pub done_label_style: Style,
+    /// Style for the animated spinner character.
     pub spinner_style: Style,
+    /// Style for the checkmark in the done state.
     pub checkmark_style: Style,
 }
 
@@ -52,6 +79,7 @@ impl Default for Spinner {
 }
 
 impl Spinner {
+    /// Create a new spinner with the given label.
     pub fn new(label: impl Into<String>) -> Self {
         Self {
             label: label.into(),
@@ -67,16 +95,20 @@ impl Spinner {
     }
 }
 
-/// State for a [`Spinner`] component.
+/// Internal state for a [`Spinner`] component.
 ///
-/// Contains animation frame and styles (internal state).
-/// Label and done status are props on the [`Spinner`] struct.
+/// Tracks the current animation frame. You typically don't interact
+/// with this directly — the spinner's lifecycle interval calls
+/// [`tick`](SpinnerState::tick) automatically. Access it via
+/// [`InlineRenderer::state_mut`](crate::InlineRenderer::state_mut)
+/// if you need manual control.
 pub struct SpinnerState {
     /// Current animation frame index. Increment to animate.
     pub frame: usize,
 }
 
 impl SpinnerState {
+    /// Create initial spinner state at frame 0.
     pub fn new() -> Self {
         Self { frame: 0 }
     }

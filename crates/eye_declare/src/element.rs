@@ -38,10 +38,22 @@ pub(crate) struct ElementEntry {
 
 /// A list of component descriptions for declarative tree building.
 ///
-/// Used with `Renderer::rebuild` to describe what the tree should
-/// look like. View functions return `Elements`.
+/// `Elements` is what view functions return and what the framework
+/// reconciles against the existing component tree. Build one with the
+/// [`element!`](crate::element!) macro or the imperative API:
 ///
 /// ```ignore
+/// // With the element! macro (preferred):
+/// fn my_view(state: &MyState) -> Elements {
+///     element! {
+///         "Hello"
+///         #(if state.loading {
+///             Spinner(key: "spinner", label: "Loading...")
+///         })
+///     }
+/// }
+///
+/// // Imperative API:
 /// fn my_view(state: &MyState) -> Elements {
 ///     let mut els = Elements::new();
 ///     els.add(TextBlock::new().unstyled("Hello"));
@@ -141,14 +153,17 @@ impl Elements {
         }
     }
 
-    /// Add a VStack wrapper around the given children.
+    /// Add a [`VStack`](crate::VStack) wrapper around the given children.
+    ///
+    /// Equivalent to `add_with_children(VStack, children)`.
     pub fn group(&mut self, children: Elements) -> ElementHandle<'_> {
         self.add_with_children(crate::component::VStack, children)
     }
 
-    /// Add an HStack wrapper around the given children.
+    /// Add an [`HStack`](crate::HStack) wrapper around the given children.
     ///
-    /// Children declare their width with `.width(WidthConstraint::Fixed(n))`.
+    /// Children default to [`WidthConstraint::Fill`].
+    /// Use `.width(WidthConstraint::Fixed(n))` for fixed-width children.
     pub fn hstack(&mut self, children: Elements) -> ElementHandle<'_> {
         self.add_with_children(crate::component::HStack, children)
     }
@@ -174,7 +189,17 @@ impl Default for Elements {
     }
 }
 
-/// Handle returned by [`Elements::add`] for setting element keys.
+/// Handle returned by [`Elements::add`] for chaining `.key()` and `.width()`.
+///
+/// This handle has a builder-style API — call methods on it immediately
+/// after adding a component to an [`Elements`] list:
+///
+/// ```ignore
+/// let mut els = Elements::new();
+/// els.add(Spinner::new("loading..."))
+///     .key("my-spinner")
+///     .width(WidthConstraint::Fixed(20));
+/// ```
 pub struct ElementHandle<'a> {
     entry: &'a mut ElementEntry,
 }

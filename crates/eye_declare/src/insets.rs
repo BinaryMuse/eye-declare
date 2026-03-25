@@ -1,19 +1,29 @@
-/// Insets define the content area within a component's render area.
+/// Defines the padding between a component's outer area and its children's
+/// content area.
 ///
-/// The renderer lays out children inside the inset region. The component
-/// renders its own chrome (borders, padding, backgrounds) in the outer
-/// area via `render()`.
+/// Return `Insets` from [`Component::content_inset`](crate::Component::content_inset)
+/// to reserve space for borders, padding, or other chrome. The framework
+/// renders children inside the inset region, while the component's
+/// [`render`](crate::Component::render) method receives the full outer area
+/// to draw its chrome.
+///
+/// # Construction
 ///
 /// ```ignore
-/// Insets::all(1)       // 1-cell border on all sides
-/// Insets::symmetric(1, 2)  // 1 top/bottom, 2 left/right
+/// Insets::ZERO              // no insets (default)
+/// Insets::all(1)            // 1-cell border on all sides
+/// Insets::symmetric(1, 2)   // 1 top/bottom, 2 left/right
 /// Insets::new().top(1).left(2)  // builder style
 /// ```
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Insets {
+    /// Rows reserved above the content area.
     pub top: u16,
+    /// Columns reserved to the right of the content area.
     pub right: u16,
+    /// Rows reserved below the content area.
     pub bottom: u16,
+    /// Columns reserved to the left of the content area.
     pub left: u16,
 }
 

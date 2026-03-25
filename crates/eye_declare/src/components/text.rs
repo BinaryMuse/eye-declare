@@ -10,16 +10,21 @@ use crate::wrap;
 
 /// A segment of text with a single style.
 ///
-/// Used as a child of [`Line`] in the `element!` macro:
+/// `Span` is a data child of [`Line`] — it does not implement
+/// [`Component`]. Use it inside `Line` blocks
+/// in the `element!` macro to build multi-styled lines:
+///
 /// ```ignore
 /// Line {
-///     Span(text: "hello ", style: Style::default().fg(Color::Green))
-///     Span(text: "world")
+///     Span(text: "hello ".into(), style: Style::default().fg(Color::Green))
+///     Span(text: "world".into())
 /// }
 /// ```
 #[derive(Clone, Debug)]
 pub struct Span {
+    /// The text content of this span.
     pub text: String,
+    /// The style applied to this span's text.
     pub style: Style,
 }
 
@@ -38,20 +43,24 @@ impl Default for Span {
 
 /// A line of text composed of one or more [`Span`]s.
 ///
-/// Used as a child of [`TextBlock`] in the `element!` macro:
+/// `Line` is a data child of [`TextBlock`] — it does not implement
+/// [`Component`]. Use it inside `TextBlock` blocks
+/// in the `element!` macro for multi-styled lines:
+///
 /// ```ignore
 /// TextBlock {
 ///     Line {
-///         Span(text: "Name: ", style: bold())
-///         Span(text: name, style: green())
+///         Span(text: "Name: ".into(), style: Style::default().add_modifier(Modifier::BOLD))
+///         Span(text: name.clone(), style: Style::default().fg(Color::Green))
 ///     }
 ///     Line {
-///         Span(text: "plain text")
+///         Span(text: "plain text".into())
 ///     }
 /// }
 /// ```
 #[derive(Clone, Debug, Default)]
 pub struct Line {
+    /// The spans that compose this line.
     pub spans: Vec<Span>,
 }
 
@@ -113,39 +122,57 @@ impl ChildCollector for TextBlock {
 // TextBlock
 // ---------------------------------------------------------------------------
 
-/// A built-in text component with display-time word wrapping.
+/// Styled text with display-time word wrapping.
 ///
-/// Stores logical lines of styled text as props on the component itself.
-/// Wrapping is computed at render time based on the current width,
-/// so content reflows automatically on resize.
+/// `TextBlock` is the primary text component. It stores logical lines
+/// of styled text as props and computes word wrapping at render time,
+/// so content reflows automatically when the terminal is resized.
 ///
-/// ## Builder API
+/// # Builder API
+///
 /// ```ignore
 /// TextBlock::new()
-///     .line("styled text", Style::default().fg(Color::Red))
-///     .unstyled("plain text")
+///     .line("error: something failed", Style::default().fg(Color::Red))
+///     .unstyled("see logs for details")
 /// ```
 ///
-/// ## element! macro with Line/Span children
+/// # `element!` macro with data children
+///
+/// For multi-styled lines, use [`Line`] and [`Span`] as data children:
+///
 /// ```ignore
 /// element! {
 ///     TextBlock {
 ///         Line {
-///             Span(text: "Name: ", style: Style::default().add_modifier(Modifier::BOLD))
-///             Span(text: name, style: Style::default().fg(Color::Green))
+///             Span(text: "Name: ".into(), style: Style::default().add_modifier(Modifier::BOLD))
+///             Span(text: name.clone(), style: Style::default().fg(Color::Green))
 ///         }
 ///         Line {
-///             Span(text: "Status: ")
-///             Span(text: status, style: status_style)
+///             Span(text: format!("Status: {status}"))
 ///         }
 ///     }
 /// }
 /// ```
+///
+/// # String literal shorthand
+///
+/// In the `element!` macro, bare string literals are automatically
+/// wrapped in a `TextBlock`:
+///
+/// ```ignore
+/// element! {
+///     "This becomes a TextBlock automatically"
+/// }
+/// ```
 pub struct TextBlock {
+    /// The logical lines of styled text. Each [`Line`] contains one or more
+    /// [`Span`]s. Word wrapping is computed at render time.
     pub lines: Vec<Line>,
 }
 
 impl TextBlock {
+    /// Create an empty text block. Use [`.line()`](TextBlock::line) or
+    /// [`.unstyled()`](TextBlock::unstyled) to add content.
     pub fn new() -> Self {
         Self { lines: Vec::new() }
     }

@@ -8,26 +8,37 @@ use crate::element::Elements;
 use crate::hooks::Hooks;
 use crate::insets::Insets;
 
-/// Opaque handle into the node arena.
+/// Opaque handle identifying a node in the component tree.
+///
+/// Returned by methods like [`InlineRenderer::push`](crate::InlineRenderer::push)
+/// and used to reference specific components for state access, removal,
+/// and other operations.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct NodeId(pub(crate) usize);
 
-/// Layout direction for a container node.
+/// Layout direction for a container's children.
+///
+/// Most components use the default [`Vertical`](Layout::Vertical) layout.
+/// Override [`Component::layout`](crate::Component::layout) to return
+/// `Horizontal` for side-by-side children (or use [`HStack`](crate::HStack)).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Layout {
-    /// Children stack top-to-bottom, each getting full parent width.
+    /// Children stack top-to-bottom, each receiving the full parent width.
     #[default]
     Vertical,
-    /// Children lay left-to-right, width allocated per constraints.
+    /// Children lay out left-to-right, widths allocated by [`WidthConstraint`].
     Horizontal,
 }
 
-/// Width constraint for a child within a horizontal container.
+/// How a child claims horizontal space inside an [`HStack`](crate::HStack).
+///
+/// Set via [`ElementHandle::width`](crate::ElementHandle::width) or the
+/// `width:` prop on [`Column`](crate::Column) in the `element!` macro.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum WidthConstraint {
-    /// Exact width in columns.
+    /// Reserve exactly `n` columns for this child.
     Fixed(u16),
-    /// Take remaining space (split equally among Fill children).
+    /// Take remaining space, split equally among all `Fill` siblings.
     #[default]
     Fill,
 }
