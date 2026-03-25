@@ -5,7 +5,7 @@ repository = "https://github.com/BinaryMuse/eye-declare"
 version = "0.1.1"
 edition = "2024"
 license = "MIT"
-readme = "README.md"
+readme = "../../README.md"
 
 [dependencies]
 ratatui-core = "0.1"
