@@ -164,10 +164,12 @@ impl Renderer {
             let is_backtab = *code == KeyCode::BackTab
                 || (*code == KeyCode::Tab && modifiers.contains(KeyModifiers::SHIFT));
 
-            if is_tab || is_backtab {
-                self.cycle_focus(is_backtab);
+            if (is_tab || is_backtab) && self.cycle_focus(is_backtab) {
                 return EventResult::Consumed;
             }
+            // If Tab/BackTab didn't cycle focus (0 or 1 focusable nodes),
+            // fall through to normal event handling so components can use
+            // the key for their own purposes.
         }
 
         let Some(focused) = self.focused else {
@@ -215,10 +217,14 @@ impl Renderer {
     }
 
     /// Cycle focus to the next (or previous) focusable component.
-    fn cycle_focus(&mut self, reverse: bool) {
+    ///
+    /// Returns `true` if focus actually moved to a different component.
+    /// Returns `false` if there are no focusable components or only one
+    /// (so Tab/BackTab should fall through to normal event handling).
+    fn cycle_focus(&mut self, reverse: bool) -> bool {
         let focusable = self.focusable_nodes();
         if focusable.is_empty() {
-            return;
+            return false;
         }
 
         let current_idx = self
@@ -227,6 +233,10 @@ impl Renderer {
 
         let next_idx = match current_idx {
             Some(idx) => {
+                if focusable.len() == 1 {
+                    // Only one focusable component — nowhere to cycle
+                    return false;
+                }
                 if reverse {
                     if idx == 0 {
                         focusable.len() - 1
@@ -241,6 +251,7 @@ impl Renderer {
         };
 
         self.focused = Some(focusable[next_idx]);
+        true
     }
 
     /// Remove a node and all its descendants from the tree.
@@ -1470,13 +1481,32 @@ mod tests {
     }
 
     #[test]
-    fn tab_with_no_focusable_nodes_does_nothing() {
+    fn tab_with_no_focusable_nodes_falls_through() {
         let mut r = Renderer::new(10);
         let _id = r.push(TextBlock); // not focusable
         r.state_mut::<TextBlock>(_id).push("text".to_string());
 
-        r.handle_event(&tab_event());
+        // Tab should return Ignored so the event can be handled
+        // by components for their own purposes (e.g., inserting text).
+        let result = r.handle_event(&tab_event());
         assert_eq!(r.focus(), None);
+        assert_eq!(result, EventResult::Ignored);
+    }
+
+    #[test]
+    fn tab_with_single_focusable_falls_through() {
+        let mut r = Renderer::new(10);
+        let f1 = r.push(FocusableItem);
+
+        // First Tab focuses the only item
+        let result = r.handle_event(&tab_event());
+        assert_eq!(r.focus(), Some(f1));
+        assert_eq!(result, EventResult::Consumed);
+
+        // Second Tab has nowhere to cycle — falls through
+        let result = r.handle_event(&tab_event());
+        assert_eq!(r.focus(), Some(f1));
+        assert_eq!(result, EventResult::Ignored);
     }
 
     // --- Declarative rebuild tests ---
