@@ -588,19 +588,23 @@ impl<S: Send + 'static> Application<S> {
     /// Finalize after an interactive loop: reclaim blank rows, restore terminal.
     ///
     /// Best-effort: I/O errors during teardown are silently ignored so
-    /// the original loop result is never shadowed. The guard is dropped
-    /// first to disable protocols and raw mode before writing the final
-    /// newline.
+    /// the original loop result is never shadowed.
     fn leave_raw_mode(&mut self, guard: RawModeGuard, stdout: &mut impl Write) {
+        // Write finalize bytes while still in raw mode — cooked mode's
+        // output processing (OPOST) can interfere with escape sequences.
         let finalize_bytes = self.inline.finalize();
-        // Drop guard first — disables protocols while raw mode is still
-        // active, then disables raw mode, then restores cursor.
-        drop(guard);
         if !finalize_bytes.is_empty() {
             let _ = stdout.write_all(&finalize_bytes);
             let _ = stdout.flush();
         }
-        let _ = writeln!(stdout);
+        // Now drop guard: disables protocols, raw mode, restores cursor.
+        drop(guard);
+        // Two newlines: one to end the content region, one as a buffer
+        // for shell prompts that use cursor manipulation (e.g.,
+        // Powerlevel10k's PROMPT_SP or instant prompt) which can
+        // overwrite the line immediately above the prompt.
+        let _ = write!(stdout, "\n\n");
+        let _ = stdout.flush();
     }
 
     async fn render_loop(&mut self, writer: &mut impl Write) -> io::Result<()> {

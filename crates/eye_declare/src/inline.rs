@@ -461,14 +461,18 @@ impl InlineRenderer {
         let mut output = Vec::new();
 
         // Position cursor at the first erasable blank row.
+        // Use CR first to clear any pending-wrap state, then CPL
+        // (Cursor Previous Line) which moves up N lines and to
+        // column 0 atomically — more reliable than CUU + CR for
+        // terminals with edge-case wrap behavior.
+        output.extend_from_slice(b"\r");
         if self.cursor.row > target_row {
             let up = self.cursor.row - target_row;
-            output.extend_from_slice(format!("\x1b[{}A", up).as_bytes());
+            output.extend_from_slice(format!("\x1b[{}F", up).as_bytes());
         } else if self.cursor.row < target_row {
             let down = target_row - self.cursor.row;
-            output.extend_from_slice(format!("\x1b[{}B", down).as_bytes());
+            output.extend_from_slice(format!("\x1b[{}E", down).as_bytes());
         }
-        output.extend_from_slice(b"\r");
 
         // Erase from cursor to end of screen
         output.extend_from_slice(b"\x1b[J");
@@ -644,5 +648,160 @@ mod tests {
         assert_eq!(ir.emitted_rows(), 2);
         let s = String::from_utf8_lossy(&output);
         assert!(s.contains("\x1b[J"));
+    }
+
+    /// A component with a 1-cell border (insets on all sides).
+    /// Renders a border and passes children through.
+    struct BorderBox;
+
+    impl Component for BorderBox {
+        type State = ();
+
+        fn render(&self, area: Rect, buf: &mut Buffer, _state: &()) {
+            // Draw simple border chars
+            if area.width >= 2 && area.height >= 2 {
+                // Top border
+                for x in area.x..area.x + area.width {
+                    buf[(x, area.y)].set_char('─');
+                }
+                // Bottom border
+                let bot = area.y + area.height - 1;
+                for x in area.x..area.x + area.width {
+                    buf[(x, bot)].set_char('─');
+                }
+                // Side borders
+                for y in area.y..area.y + area.height {
+                    buf[(area.x, y)].set_char('│');
+                    buf[(area.x + area.width - 1, y)].set_char('│');
+                }
+            }
+        }
+
+        fn desired_height(&self, _width: u16, _state: &()) -> u16 {
+            0 // container; height comes from children
+        }
+
+        fn content_inset(&self, _state: &()) -> crate::insets::Insets {
+            crate::insets::Insets::all(1) // 1-cell border all around
+        }
+
+        fn children(&self, _state: &(), slot: Option<Elements>) -> Option<Elements> {
+            slot
+        }
+    }
+
+    crate::impl_slot_children!(BorderBox);
+
+    #[test]
+    fn finalize_after_declarative_removal() {
+        // Simulate: content (5 rows) + input box (3 rows) = 8 rows total.
+        // On exit, input box is removed via rebuild. Finalize should
+        // reclaim exactly 3 rows, preserving all 5 content rows.
+        let mut ir = InlineRenderer::new_with_height(40, 24);
+        let container = ir.push(crate::component::VStack);
+
+        // Initial build: content + input
+        let mut els = crate::element::Elements::new();
+        let content = TextBlock;
+        els.add(content).key("content");
+        let input = TextBlock;
+        els.add(input).key("input");
+        ir.rebuild(container, els);
+
+        // Set content: 5 lines
+        let content_id = ir.find_by_key(container, "content").unwrap();
+        ir.state_mut::<TextBlock>(content_id)
+            .extend(["line 1", "line 2", "line 3", "line 4", "line 5"].map(String::from));
+
+        // Set input: 3 lines
+        let input_id = ir.find_by_key(container, "input").unwrap();
+        ir.state_mut::<TextBlock>(input_id)
+            .extend(["┌──────┐", "│ text │", "└──────┘"].map(String::from));
+
+        let _first = ir.render();
+        assert_eq!(ir.emitted_rows(), 8);
+
+        // Rebuild without the input component (simulates exit)
+        let mut els = crate::element::Elements::new();
+        let content = TextBlock;
+        els.add(content).key("content");
+        ir.rebuild(container, els);
+
+        // Content is still 5 lines, input removed
+        let content_id = ir.find_by_key(container, "content").unwrap();
+        assert_eq!(ir.state_mut::<TextBlock>(content_id).len(), 5);
+
+        let _second = ir.render();
+        // emitted_rows stays at 8
+        assert_eq!(ir.emitted_rows(), 8);
+
+        // Finalize should reclaim exactly 3 rows (the input box)
+        let output = ir.finalize();
+        assert!(!output.is_empty());
+        assert_eq!(
+            ir.emitted_rows(),
+            5,
+            "finalize should leave exactly 5 rows (content), not {}",
+            ir.emitted_rows()
+        );
+    }
+
+    #[test]
+    fn finalize_with_bordered_input_removal() {
+        // Simulate Atuin pattern: content (5 rows) + bordered input (3 rows).
+        // The bordered input has 1-cell insets, so it's:
+        //   border-top (1) + content (1) + border-bottom (1) = 3 rows.
+        // Total: 8 rows. Remove the bordered input, finalize should
+        // reclaim exactly 3 rows.
+        let mut ir = InlineRenderer::new_with_height(40, 24);
+        let container = ir.push(crate::component::VStack);
+
+        // Initial build: content + bordered input
+        let mut els = crate::element::Elements::new();
+        els.add(TextBlock).key("content");
+        let mut input_children = crate::element::Elements::new();
+        input_children.add(TextBlock).key("input-text");
+        els.add_with_children(BorderBox, input_children)
+            .key("input-box");
+        ir.rebuild(container, els);
+
+        // Set content: 5 lines
+        let content_id = ir.find_by_key(container, "content").unwrap();
+        ir.state_mut::<TextBlock>(content_id)
+            .extend(["line 1", "line 2", "line 3", "line 4", "line 5"].map(String::from));
+
+        // Set input text: 1 line (inside 1-cell border = 3 rows total)
+        let input_box_id = ir.find_by_key(container, "input-box").unwrap();
+        let input_text_id = ir.find_by_key(input_box_id, "input-text").unwrap();
+        ir.state_mut::<TextBlock>(input_text_id)
+            .push("Type here...".to_string());
+
+        let _first = ir.render();
+        assert_eq!(
+            ir.emitted_rows(),
+            8,
+            "should be 5 content + 3 bordered input = 8 rows"
+        );
+
+        // Rebuild without the input box (simulates exit)
+        let mut els = crate::element::Elements::new();
+        els.add(TextBlock).key("content");
+        ir.rebuild(container, els);
+
+        let content_id = ir.find_by_key(container, "content").unwrap();
+        assert_eq!(ir.state_mut::<TextBlock>(content_id).len(), 5);
+
+        let _second = ir.render();
+        assert_eq!(ir.emitted_rows(), 8);
+
+        // Finalize should reclaim exactly 3 rows
+        let output = ir.finalize();
+        assert!(!output.is_empty());
+        assert_eq!(
+            ir.emitted_rows(),
+            5,
+            "finalize should leave exactly 5 content rows, not {}",
+            ir.emitted_rows()
+        );
     }
 }
