@@ -1975,11 +1975,10 @@ mod tests {
                 modifiers,
                 ..
             }) = event
+                && modifiers.contains(KeyModifiers::CONTROL)
             {
-                if modifiers.contains(KeyModifiers::CONTROL) {
-                    state.push("capture:ctrl-n".to_string());
-                    return EventResult::Consumed;
-                }
+                state.push("capture:ctrl-n".to_string());
+                return EventResult::Consumed;
             }
             EventResult::Ignored
         }

@@ -287,10 +287,9 @@ fn event_loop(
             kind: KeyEventKind::Press,
             ..
         }) = &evt
+            && modifiers.contains(KeyModifiers::CONTROL)
         {
-            if modifiers.contains(KeyModifiers::CONTROL) {
-                break;
-            }
+            break;
         }
 
         // Resize
