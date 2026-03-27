@@ -12,8 +12,8 @@ eye-declare is in early development; expect breaking changes.
 
 Coming changes:
 
-- [ ] Better HStack layout options
 - [ ] More ergonomic "leaf" API
+- [ ] Improvements to height measurement and vertical layout
 
 ## Quick Start
 
