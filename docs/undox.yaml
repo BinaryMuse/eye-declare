@@ -2,6 +2,7 @@ site:
   name: eye-declare
   description: A declarative inline TUI rendering library for Rust
   url: https://eye-declare.dev
+  repository: https://github.com/BinaryMuse/eye-declare
 
 sources:
   - name: docs
