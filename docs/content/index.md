@@ -56,26 +56,26 @@ async fn main() -> std::io::Result<()> {
 
 ## Get started
 
-- [Introduction](getting-started/introduction.md) — why eye-declare exists and how it works
-- [Installation](getting-started/installation.md) — add it to your project
-- [Quick Start](getting-started/quick-start.md) — build your first inline TUI
+- [Introduction](/getting-started/introduction) — why eye-declare exists and how it works
+- [Installation](/getting-started/installation) — add it to your project
+- [Quick Start](/getting-started/quick-start) — build your first inline TUI
 
 ## Learn
 
-- [The element! Macro](guide/element-macro.md) — full syntax reference
-- [Components](guide/components.md) — the Component trait and composition patterns
-- [Layout](guide/layout.md) — vertical and horizontal stacking
-- [Lifecycle Hooks](guide/lifecycle-hooks.md) — intervals, mount/unmount, autofocus
-- [Events and Focus](guide/events-and-focus.md) — keyboard handling and focus management
-- [Context](guide/context.md) — sharing data without prop-drilling
-- [Reconciliation](guide/reconciliation.md) — how state survives rebuilds
-- [Application](guide/application.md) — the Application API and running modes
+- [The element! Macro](/guide/element-macro) — full syntax reference
+- [Components](/guide/components) — the Component trait and composition patterns
+- [Layout](/guide/layout) — vertical and horizontal stacking
+- [Lifecycle Hooks](/guide/lifecycle-hooks) — intervals, mount/unmount, autofocus
+- [Events and Focus](/guide/events-and-focus) — keyboard handling and focus management
+- [Context](/guide/context) — sharing data without prop-drilling
+- [Reconciliation](/guide/reconciliation) — how state survives rebuilds
+- [Application](/guide/application) — the Application API and running modes
 
 ## Reference
 
-- [Built-in Components](reference/built-in-components.md) — TextBlock, Spinner, Markdown, VStack, HStack, Column
-- [Terminal Options](reference/terminal-options.md) — Ctrl+C behavior, keyboard protocols, bracketed paste
-- [Imperative API](reference/imperative-api.md) — InlineRenderer for direct control
+- [Built-in Components](/reference/built-in-components) — TextBlock, Spinner, Markdown, VStack, HStack, Column
+- [Terminal Options](/reference/terminal-options) — Ctrl+C behavior, keyboard protocols, bracketed paste
+- [Imperative API](/reference/imperative-api) — InlineRenderer for direct control
 
 ## Status
 
