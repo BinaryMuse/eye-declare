@@ -4217,12 +4217,7 @@ mod tests {
 
             fn render(&self, area: Rect, buf: &mut Buffer, _state: &()) {
                 // This should NOT be called
-                buf.set_string(
-                    area.x,
-                    area.y,
-                    "BAD",
-                    ratatui_core::style::Style::default(),
-                );
+                buf.set_string(area.x, area.y, "BAD", ratatui_core::style::Style::default());
             }
 
             fn content_inset(&self, _state: &()) -> crate::insets::Insets {

@@ -17,8 +17,7 @@ use std::time::Duration;
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use eye_declare::{
-    Application, Canvas, Component, ControlFlow, Elements, Handle, Hooks, Markdown, TextBlock,
-    View,
+    Application, Canvas, Component, ControlFlow, Elements, Handle, Hooks, Markdown, TextBlock, View,
 };
 use ratatui_core::{
     buffer::Buffer,

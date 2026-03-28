@@ -15,8 +15,8 @@ use std::thread;
 use std::time::Duration;
 
 use eye_declare::{
-    impl_slot_children, BorderType, Canvas, Component, Elements, InlineRenderer, Markdown, Spinner,
-    VStack, View,
+    BorderType, Canvas, Component, Elements, InlineRenderer, Markdown, Spinner, VStack, View,
+    impl_slot_children,
 };
 use ratatui_core::style::{Color, Modifier, Style};
 use ratatui_core::{buffer::Buffer, layout::Rect, text::Line, widgets::Widget};
@@ -126,7 +126,9 @@ fn chat_view(state: &AppState) -> Elements {
     // Render messages inside Card containers
     for (i, msg) in state.messages.iter().enumerate() {
         let mut card_children = Elements::new();
-        card_children.add(Markdown::new(msg)).key(format!("msg-{i}"));
+        card_children
+            .add(Markdown::new(msg))
+            .key(format!("msg-{i}"));
         els.add_with_children(
             Card {
                 title: "Response".into(),

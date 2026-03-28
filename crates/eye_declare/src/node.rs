@@ -284,9 +284,10 @@ pub(crate) struct Node {
     /// render_node uses the cached probe buffer instead of rendering again.
     pub probe_rendered: bool,
     /// Whether this node uses `view()` to define its element tree.
-    /// Set during reconciliation. When true, render_node skips the
-    /// component's render() and content_inset(), treating the node
-    /// as a transparent container.
+    /// Initialised from `component.uses_view()` in `Node::new`, kept in
+    /// sync by `swap_component` and `resolve_children`. When true,
+    /// `render_node` skips the component's `render()` and `content_inset()`,
+    /// treating the node as a transparent container.
     pub uses_view: bool,
     /// The area this node was last rendered into (set by the framework).
     pub layout_rect: Option<Rect>,

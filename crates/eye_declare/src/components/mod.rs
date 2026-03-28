@@ -3,6 +3,8 @@
 //! These cover common terminal UI patterns out of the box. For custom
 //! components, implement the [`Component`](crate::Component) trait directly.
 
+/// Raw buffer rendering component. See [`Canvas`].
+pub mod canvas;
 /// Markdown rendering component. See [`Markdown`].
 pub mod markdown;
 /// Animated spinner component. See [`Spinner`].
@@ -11,8 +13,6 @@ pub mod spinner;
 pub mod text;
 /// Unified layout container. See [`View`].
 pub mod view;
-/// Raw buffer rendering component. See [`Canvas`].
-pub mod canvas;
 
 pub use canvas::Canvas;
 pub use markdown::{Markdown, MarkdownState};
