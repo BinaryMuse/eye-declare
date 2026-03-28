@@ -8,8 +8,7 @@
 //! # Examples
 //!
 //! ```ignore
-//! use eye_declare::{element, View, Direction};
-//! use ratatui_widgets::block::BorderType;
+//! use eye_declare::{element, View, Direction, BorderType, WidthConstraint};
 //!
 //! // Simple vertical container (default)
 //! element! {
@@ -21,15 +20,15 @@
 //!
 //! // Bordered card with title and padding
 //! element! {
-//!     View(border: BorderType::Rounded, title: "My Card".into(), padding: 1) {
+//!     View(border: BorderType::Rounded, title: "My Card".into(), padding: 1u16) {
 //!         "Card content"
 //!     }
 //! }
 //!
 //! // Horizontal layout with fixed-width sidebar
 //! element! {
-//!     View(direction: Row) {
-//!         View(width: Fixed(20), border: BorderType::Plain) {
+//!     View(direction: Direction::Row) {
+//!         View(width: WidthConstraint::Fixed(20), border: BorderType::Plain) {
 //!             "Sidebar"
 //!         }
 //!         View {
@@ -47,6 +46,7 @@ use ratatui_core::widgets::Widget;
 use ratatui_widgets::block::{Block, Padding};
 use ratatui_widgets::borders::{BorderType, Borders};
 
+use crate::cells::Cells;
 use crate::component::Component;
 use crate::impl_slot_children;
 use crate::insets::Insets;
@@ -89,19 +89,21 @@ pub struct View {
 
     /// Base padding applied to all sides (default 0). Each side uses this
     /// value unless overridden by a side-specific field (`padding_top`, etc.).
-    pub padding: u16,
+    ///
+    /// Accepts bare integer literals in the `element!` macro: `padding: 1`.
+    pub padding: Cells,
 
     /// Padding above content. Overrides `padding` for the top side.
-    pub padding_top: Option<u16>,
+    pub padding_top: Option<Cells>,
 
     /// Padding below content. Overrides `padding` for the bottom side.
-    pub padding_bottom: Option<u16>,
+    pub padding_bottom: Option<Cells>,
 
     /// Padding left of content. Overrides `padding` for the left side.
-    pub padding_left: Option<u16>,
+    pub padding_left: Option<Cells>,
 
     /// Padding right of content. Overrides `padding` for the right side.
-    pub padding_right: Option<u16>,
+    pub padding_right: Option<Cells>,
 
     /// Width constraint for this View when inside a [`Direction::Row`] parent.
     pub width: WidthConstraint,
@@ -120,7 +122,7 @@ impl Default for View {
             title_bottom: None,
             title_style: Style::default(),
             title_bottom_style: Style::default(),
-            padding: 0,
+            padding: Cells::ZERO,
             padding_top: None,
             padding_bottom: None,
             padding_left: None,
@@ -132,13 +134,14 @@ impl Default for View {
 }
 
 impl View {
-    /// Compute the effective padding for each side.
+    /// Compute the effective padding for each side, in raw u16 cells.
     fn effective_padding(&self) -> (u16, u16, u16, u16) {
+        let base = self.padding.0;
         (
-            self.padding_top.unwrap_or(self.padding),
-            self.padding_right.unwrap_or(self.padding),
-            self.padding_bottom.unwrap_or(self.padding),
-            self.padding_left.unwrap_or(self.padding),
+            self.padding_top.map_or(base, |c| c.0),
+            self.padding_right.map_or(base, |c| c.0),
+            self.padding_bottom.map_or(base, |c| c.0),
+            self.padding_left.map_or(base, |c| c.0),
         )
     }
 
@@ -218,7 +221,7 @@ mod tests {
         let v = View::default();
         assert_eq!(v.direction, Direction::Column);
         assert!(v.border.is_none());
-        assert_eq!(v.padding, 0);
+        assert_eq!(v.padding, Cells::ZERO);
         assert_eq!(v.layout(), Layout::Vertical);
         assert_eq!(v.content_inset(&()), Insets::ZERO);
     }
@@ -246,7 +249,7 @@ mod tests {
     fn border_plus_padding() {
         let v = View {
             border: Some(BorderType::Rounded),
-            padding: 2,
+            padding: Cells(2),
             ..View::default()
         };
         let insets = v.content_inset(&());
@@ -257,7 +260,7 @@ mod tests {
     #[test]
     fn padding_without_border() {
         let v = View {
-            padding: 1,
+            padding: Cells(1),
             ..View::default()
         };
         let insets = v.content_inset(&());
@@ -267,9 +270,9 @@ mod tests {
     #[test]
     fn side_specific_padding_overrides_general() {
         let v = View {
-            padding: 1,
-            padding_left: Some(3),
-            padding_top: Some(0),
+            padding: Cells(1),
+            padding_left: Some(Cells(3)),
+            padding_top: Some(Cells(0)),
             ..View::default()
         };
         let insets = v.content_inset(&());
@@ -288,8 +291,8 @@ mod tests {
     fn side_specific_padding_with_border() {
         let v = View {
             border: Some(BorderType::Plain),
-            padding: 1,
-            padding_left: Some(2),
+            padding: Cells(1),
+            padding_left: Some(Cells(2)),
             ..View::default()
         };
         let insets = v.content_inset(&());

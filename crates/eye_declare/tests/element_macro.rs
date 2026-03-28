@@ -609,7 +609,7 @@ fn view_with_border_renders_content() {
 #[test]
 fn view_with_props_and_key() {
     let els = element! {
-        View(key: "card", border: BorderType::Rounded, padding: 1u16) {
+        View(key: "card", border: BorderType::Rounded, padding: 1) {
             "content"
         }
     };

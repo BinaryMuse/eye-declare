@@ -166,6 +166,9 @@ pub mod inline;
 /// The [`Insets`] type for declaring content padding and border chrome.
 pub mod insets;
 
+/// Cell measurement type for component props. See [`Cells`].
+pub mod cells;
+
 pub(crate) mod context;
 pub(crate) mod escape;
 pub(crate) mod frame;
@@ -177,6 +180,7 @@ pub use app::{
     Application, ApplicationBuilder, CommittedElement, ControlFlow, CtrlCBehavior, Handle,
     KeyboardProtocol,
 };
+pub use cells::Cells;
 pub use children::{AddTo, ChildCollector, ComponentWithSlot, DataHandle, SpliceInto};
 pub use component::{Column, Component, EventResult, HStack, Tracked, VStack};
 pub use components::markdown::{Markdown, MarkdownState};
