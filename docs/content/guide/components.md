@@ -103,6 +103,20 @@ fn render(&self, area: Rect, buf: &mut Buffer, state: &Self::State) {
 
 The framework only calls `render()` when the component is dirty (state changed) or the layout changed. You don't need to optimize for no-op renders.
 
+### Height measurement
+
+The framework measures each component's height automatically by examining the render output — you don't need to calculate it yourself. Most components just implement `render()` and the framework figures out the rest.
+
+The exception is components that **fill their given area** rather than rendering a fixed amount of content (e.g., a bordered input box that stretches to fit). These should override `desired_height()` to declare their height explicitly:
+
+```rust
+fn desired_height(&self, _width: u16, _state: &Self::State) -> Option<u16> {
+    Some(3) // border-top + content row + border-bottom
+}
+```
+
+The default returns `None`, which means "measure from render output."
+
 ## Composite components
 
 Components can generate their own child trees by overriding `children()`:
