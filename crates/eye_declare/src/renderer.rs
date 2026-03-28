@@ -69,6 +69,22 @@ impl Renderer {
     /// instead. The imperative path does not call `view()` to resolve
     /// the component's element tree.
     pub fn append_child<C: Component>(&mut self, parent: NodeId, component: C) -> NodeId {
+        debug_assert!(
+            !component.uses_view(),
+            "component uses view() but was added via append_child(); \
+             use rebuild() instead"
+        );
+        self.append_child_inner(parent, component)
+    }
+
+    /// Internal append without the view() guard — used by Element::build
+    /// during reconciliation, where view components are handled by
+    /// resolve_children after the node is created.
+    pub(crate) fn append_child_inner<C: Component>(
+        &mut self,
+        parent: NodeId,
+        component: C,
+    ) -> NodeId {
         let layout = component.layout();
         let width_constraint = component.width_constraint();
         let mut node = Node::new(component);
