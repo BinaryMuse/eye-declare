@@ -741,7 +741,9 @@ impl Renderer {
         let state = node.state.inner_as_any();
         let children = slot.unwrap_or_default();
         let result = node.component.view_erased(state, children);
-        if result.is_empty() {
+        // Return Some even when empty if the node already has children,
+        // so reconcile_children can tombstone them on transition to empty.
+        if result.is_empty() && node.children.is_empty() {
             None
         } else {
             Some(result)
@@ -4162,7 +4164,7 @@ mod tests {
     }
 
     #[test]
-    fn view_component_skips_render_and_inset() {
+    fn view_component_renders_view_children() {
         // After the uses_view() removal, view() components still have their
         // render() and content_inset() called normally. This test verifies
         // that a component using view() renders its view children correctly.

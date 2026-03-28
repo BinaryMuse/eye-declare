@@ -372,10 +372,11 @@ pub trait Component: Send + Sync + 'static {
     /// - **Generate own tree** using [`Canvas`](crate::Canvas) for raw rendering
     /// - **Ignore children** for pure leaf components
     ///
-    /// Components that override `view()` are transparent containers —
-    /// the framework does not call their `render()` or `content_inset()`.
-    /// Those methods are only used by primitive components (View, Canvas)
-    /// that render directly into the buffer.
+    /// Components that override `view()` are expected to be transparent
+    /// containers — their `render()` and `content_inset()` should be left
+    /// as no-ops. The framework calls both on all containers; for primitive
+    /// components like `View` and `Canvas` these methods provide border/inset
+    /// rendering, but for view-based components they should do nothing.
     ///
     /// # Example
     ///
