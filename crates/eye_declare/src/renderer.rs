@@ -795,9 +795,12 @@ impl Renderer {
                         Some(ps) => self.focusable_nodes_in_scope(ps),
                         None => self.focusable_nodes(),
                     };
-                    self.focused = candidates
+                    if let Some(fallback) = candidates
                         .into_iter()
-                        .find(|&n| !self.is_in_subtree(n, id));
+                        .find(|&n| !self.is_in_subtree(n, id))
+                    {
+                        self.set_focus(fallback);
+                    }
                 }
             } else {
                 self.saved_focus.remove(&id);
