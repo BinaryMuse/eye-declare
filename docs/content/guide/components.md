@@ -9,7 +9,7 @@ Components are the building blocks of an eye-declare UI. Every piece of your int
 
 ## The Component trait
 
-At minimum, a component implements `render()`:
+A component that renders directly implements `render()`:
 
 ```rust
 use eye_declare::Component;
@@ -221,11 +221,82 @@ Insets::symmetric(1, 2)               // top/bottom 1, left/right 2
 Insets::new().top(2).left(1).right(1) // builder style
 ```
 
+## Using `view()` for declarative composition
+
+Instead of implementing `render()`, `content_inset()`, and `children()` separately, components can override `view()` to express their entire visual output as an element tree. This is especially powerful for composite components that combine chrome (borders, padding) with children.
+
+Override both `uses_view()` and `view()`:
+
+```rust
+#[derive(Default)]
+struct Card {
+    pub title: String,
+}
+
+impl Component for Card {
+    type State = ();
+
+    fn uses_view(&self) -> bool { true }
+
+    fn view(&self, _state: &(), children: Elements) -> Elements {
+        let mut els = Elements::new();
+        els.add_with_children(
+            View {
+                border: Some(BorderType::Rounded),
+                title: Some(self.title.clone()),
+                padding_left: Some(Cells(1)),
+                padding_right: Some(Cells(1)),
+                ..View::default()
+            },
+            children,
+        );
+        els
+    }
+}
+
+impl_slot_children!(Card);
+```
+
+When `uses_view()` returns `true`:
+- `render()` is not called — chrome is expressed as elements (e.g., `View`)
+- `content_inset()` is not used — insets are part of the tree
+- `children()` is not called — slot children arrive as the `children` parameter
+
+This replaces what would otherwise be manual border drawing in `render()`, `content_inset()` for child placement, and `children()` for slot handling.
+
+### Canvas for raw rendering
+
+`Canvas` is a leaf component for raw buffer access, used inside `view()` when you need to render with ratatui widgets directly:
+
+```rust
+use eye_declare::Canvas;
+
+let canvas = Canvas::new(|area: Rect, buf: &mut Buffer| {
+    Paragraph::new("Hello!").render(area, buf);
+});
+
+// Optional: declare a fixed height to skip probe measurement
+let canvas = Canvas::new(|area, buf| { /* ... */ }).with_height(3);
+```
+
+Canvas is added to element lists via `els.add(Canvas::new(...))`. It's useful for:
+- Wrapping third-party ratatui widgets
+- Custom rendering that built-in components don't cover
+- Leaf components in a `view()` tree
+
+### When to use `view()` vs `render()`
+
+Use `view()` for components that **compose other components** — bordered cards, panels, layouts that wrap children. The framework handles measurement, insets, and reconciliation automatically.
+
+Use `render()` for **leaf-level custom rendering** where you need precise control over buffer output, or where the overhead of element tree allocation isn't warranted (e.g., high-frequency animation components).
+
 ## Full Component trait reference
 
 | Method | Required | Default | Purpose |
 |--------|----------|---------|---------|
-| `render()` | Yes | — | Draw into the allocated area |
+| `render()` | No | no-op | Draw into the allocated area |
+| `uses_view()` | No | `false` | Whether this component uses `view()` |
+| `view()` | No | empty | Return element tree (when `uses_view` is true) |
 | `handle_event_capture()` | No | `Ignored` | Intercept events during capture phase (root → focused) |
 | `handle_event()` | No | `Ignored` | Handle events during bubble phase (focused → root) |
 | `is_focusable()` | No | `false` | Participate in Tab cycling |

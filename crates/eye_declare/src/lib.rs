@@ -67,6 +67,7 @@
 //! | [`Spinner`] | Animated spinner with auto-tick via lifecycle hooks |
 //! | [`Markdown`] | Headings, bold, italic, inline code, code blocks, lists |
 //! | [`View`] | Unified layout container with optional borders, padding, and background |
+//! | [`Canvas`] | Raw buffer rendering via a user-provided closure |
 //! | [`VStack`] | Vertical container — children stack top-to-bottom |
 //! | [`HStack`] | Horizontal container with [`WidthConstraint`]-based layout |
 //!
@@ -183,6 +184,7 @@ pub use app::{
 pub use cells::Cells;
 pub use children::{AddTo, ChildCollector, ComponentWithSlot, DataHandle, SpliceInto};
 pub use component::{Column, Component, EventResult, HStack, Tracked, VStack};
+pub use components::canvas::Canvas;
 pub use components::markdown::{Markdown, MarkdownState};
 pub use components::spinner::{Spinner, SpinnerState};
 pub use components::text::{Line, Span, TextBlock};

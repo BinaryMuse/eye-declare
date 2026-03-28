@@ -62,6 +62,8 @@ pub(crate) trait AnyComponent: Send + Sync {
     fn is_focusable_erased(&self, state: &dyn Any) -> bool;
     fn content_inset_erased(&self, state: &dyn Any) -> Insets;
     fn children_erased(&self, state: &dyn Any, slot: Option<Elements>) -> Option<Elements>;
+    fn uses_view_erased(&self) -> bool;
+    fn view_erased(&self, state: &dyn Any, children: Elements) -> Elements;
     fn width_constraint_erased(&self) -> WidthConstraint;
     fn lifecycle_erased(
         &self,
@@ -133,6 +135,17 @@ impl<C: Component> AnyComponent for C {
             .downcast_ref::<C::State>()
             .expect("state type mismatch in children_erased");
         self.children(state, slot)
+    }
+
+    fn uses_view_erased(&self) -> bool {
+        self.uses_view()
+    }
+
+    fn view_erased(&self, state: &dyn Any, children: Elements) -> Elements {
+        let state = state
+            .downcast_ref::<C::State>()
+            .expect("state type mismatch in view_erased");
+        self.view(state, children)
     }
 
     fn width_constraint_erased(&self) -> WidthConstraint {
@@ -270,6 +283,12 @@ pub(crate) struct Node {
     /// Set during measure_height when a leaf was probe-rendered.
     /// render_node uses the cached probe buffer instead of rendering again.
     pub probe_rendered: bool,
+    /// Whether this node uses `view()` to define its element tree.
+    /// Initialised from `component.uses_view()` in `Node::new`, kept in
+    /// sync by `swap_component` and `resolve_children`. When true,
+    /// `render_node` skips the component's `render()` and `content_inset()`,
+    /// treating the node as a transparent container.
+    pub uses_view: bool,
     /// The area this node was last rendered into (set by the framework).
     pub layout_rect: Option<Rect>,
     /// TypeId of the Element that created this node (for reconciliation matching).
@@ -291,6 +310,7 @@ impl Node {
     pub fn new<C: Component>(component: C) -> Self {
         let state: Box<dyn AnyTrackedState> =
             Box::new(Tracked::new(component.initial_state().unwrap_or_default()));
+        let uses_view = component.uses_view();
 
         Self {
             component: Box::new(component),
@@ -302,6 +322,7 @@ impl Node {
             parent: None,
             force_dirty: false,
             probe_rendered: false,
+            uses_view,
             layout_rect: None,
             element_type_id: None,
             key: None,

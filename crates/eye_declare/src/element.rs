@@ -19,7 +19,7 @@ pub(crate) trait Element: Send {
 /// - **Update**: swaps the component on the existing node (preserves state)
 impl<C: Component> Element for C {
     fn build(self: Box<Self>, renderer: &mut Renderer, parent: NodeId) -> NodeId {
-        renderer.append_child(parent, *self)
+        renderer.append_child_inner(parent, *self)
     }
 
     fn update(self: Box<Self>, renderer: &mut Renderer, node_id: NodeId) {

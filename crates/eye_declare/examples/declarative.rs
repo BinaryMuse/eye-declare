@@ -5,14 +5,22 @@
 //! Spinners animate automatically via the tick registration system —
 //! no manual ticking needed.
 //!
+//! Also demonstrates `view()` components: `Card` (composite container
+//! using View for borders) and `Badge` (leaf using Canvas for raw rendering).
+//!
 //! Run with: cargo run --example declarative
 
 use std::io::{self, Write};
 use std::thread;
 use std::time::Duration;
 
-use eye_declare::{Elements, InlineRenderer, Markdown, Spinner, TextBlock, VStack};
-use ratatui_core::style::{Color, Style};
+use eye_declare::{
+    BorderType, Canvas, Component, Elements, InlineRenderer, Markdown, Spinner, VStack, View,
+    impl_slot_children,
+};
+use ratatui_core::style::{Color, Modifier, Style};
+use ratatui_core::{buffer::Buffer, layout::Rect, text::Line, widgets::Widget};
+use ratatui_widgets::paragraph::Paragraph;
 
 // ---------------------------------------------------------------------------
 // Application state — user-owned, not framework-managed
@@ -35,15 +43,99 @@ impl AppState {
 }
 
 // ---------------------------------------------------------------------------
+// Card: composite container using view() — border + title + children
+// ---------------------------------------------------------------------------
+
+/// A bordered card with a title. Uses `view()` to compose View + children
+/// instead of manual render() + content_inset() + children().
+#[derive(Default)]
+struct Card {
+    title: String,
+}
+
+impl Component for Card {
+    type State = ();
+
+    fn uses_view(&self) -> bool {
+        true
+    }
+
+    fn view(&self, _state: &(), children: Elements) -> Elements {
+        let mut els = Elements::new();
+        els.add_with_children(
+            View {
+                border: Some(BorderType::Rounded),
+                border_style: Style::default().fg(Color::DarkGray),
+                title: Some(self.title.clone()),
+                title_style: Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+                padding_left: Some(eye_declare::Cells(1)),
+                padding_right: Some(eye_declare::Cells(1)),
+                ..View::default()
+            },
+            children,
+        );
+        els
+    }
+}
+
+impl_slot_children!(Card);
+
+// ---------------------------------------------------------------------------
+// Badge: leaf component using view() + Canvas for raw rendering
+// ---------------------------------------------------------------------------
+
+/// A colored status badge. Uses `view()` with Canvas for raw rendering
+/// instead of implementing render() directly.
+#[derive(Default)]
+struct Badge {
+    label: String,
+    color: Color,
+}
+
+impl Component for Badge {
+    type State = ();
+
+    fn uses_view(&self) -> bool {
+        true
+    }
+
+    fn view(&self, _state: &(), _children: Elements) -> Elements {
+        let label = self.label.clone();
+        let color = self.color;
+        let mut els = Elements::new();
+        els.add(Canvas::new(move |area: Rect, buf: &mut Buffer| {
+            let line = Line::styled(
+                format!(" {} ", label),
+                Style::default().fg(Color::Black).bg(color),
+            );
+            Paragraph::new(line).render(area, buf);
+        }));
+        els
+    }
+}
+
+// ---------------------------------------------------------------------------
 // View function: state in, elements out
 // ---------------------------------------------------------------------------
 
 fn chat_view(state: &AppState) -> Elements {
     let mut els = Elements::new();
 
-    // Render all messages with stable keys
+    // Render messages inside Card containers
     for (i, msg) in state.messages.iter().enumerate() {
-        els.add(Markdown::new(msg)).key(format!("msg-{i}"));
+        let mut card_children = Elements::new();
+        card_children
+            .add(Markdown::new(msg))
+            .key(format!("msg-{i}"));
+        els.add_with_children(
+            Card {
+                title: "Response".into(),
+            },
+            card_children,
+        )
+        .key(format!("card-{i}"));
     }
 
     // Show thinking spinner if active (auto-animates via tick registration)
@@ -57,9 +149,12 @@ fn chat_view(state: &AppState) -> Elements {
             .key("tool");
     }
 
-    // Separator at the bottom
-    if !state.messages.is_empty() || state.thinking || state.tool_running.is_some() {
-        els.add(TextBlock::new().line("---", Style::default().fg(Color::DarkGray)));
+    // Status badge
+    if !state.messages.is_empty() && state.tool_running.is_none() && !state.thinking {
+        els.add(Badge {
+            label: "Done".into(),
+            color: Color::Green,
+        });
     }
 
     els

@@ -8,6 +8,7 @@ use crate::component::{Component, EventResult, Tracked, VStack};
 use crate::context::{ContextMap, SavedContext};
 use crate::element::{ElementEntry, Elements};
 use crate::frame::Frame;
+use crate::insets::Insets;
 use crate::node::{
     Effect, EffectKind, Layout, Node, NodeArena, NodeId, TypedEffectHandler, WidthConstraint,
 };
@@ -62,7 +63,28 @@ impl Renderer {
     }
 
     /// Add a component as a child of the given parent. Returns its NodeId.
+    ///
+    /// **Note:** Components that use [`view()`](Component::view) should be
+    /// added through the declarative [`rebuild()`](Renderer::rebuild) API
+    /// instead. The imperative path does not call `view()` to resolve
+    /// the component's element tree.
     pub fn append_child<C: Component>(&mut self, parent: NodeId, component: C) -> NodeId {
+        debug_assert!(
+            !component.uses_view(),
+            "component uses view() but was added via append_child(); \
+             use rebuild() instead"
+        );
+        self.append_child_inner(parent, component)
+    }
+
+    /// Internal append without the view() guard — used by Element::build
+    /// during reconciliation, where view components are handled by
+    /// resolve_children after the node is created.
+    pub(crate) fn append_child_inner<C: Component>(
+        &mut self,
+        parent: NodeId,
+        component: C,
+    ) -> NodeId {
         let layout = component.layout();
         let width_constraint = component.width_constraint();
         let mut node = Node::new(component);
@@ -81,13 +103,24 @@ impl Renderer {
     pub fn swap_component<C: Component>(&mut self, id: NodeId, component: C) {
         let layout = component.layout();
         let width_constraint = component.width_constraint();
+        let uses_view = component.uses_view();
         self.nodes[id].component = Box::new(component);
         self.nodes[id].layout = layout;
         self.nodes[id].width_constraint = width_constraint;
+        self.nodes[id].uses_view = uses_view;
     }
 
     /// Shorthand: add a component as a child of the root. Returns its NodeId.
+    ///
+    /// **Note:** Components that use [`view()`](Component::view) should be
+    /// added through the declarative [`rebuild()`](Renderer::rebuild) API
+    /// instead. The imperative path does not call `view()` to resolve
+    /// the component's element tree.
     pub fn push<C: Component>(&mut self, component: C) -> NodeId {
+        debug_assert!(
+            !component.uses_view(),
+            "component uses view() but was added via push(); use rebuild() instead"
+        );
         self.append_child(self.root, component)
     }
 
@@ -731,12 +764,29 @@ impl Renderer {
         }
     }
 
-    /// Resolve children for a node: pass external slot through the
-    /// component's `children()` method. Returns the final child elements.
-    fn resolve_children(&self, id: NodeId, slot: Option<Elements>) -> Option<Elements> {
-        let node = &self.nodes[id];
-        let state = node.state.inner_as_any();
-        node.component.children_erased(state, slot)
+    /// Resolve children for a node.
+    ///
+    /// If the component uses `view()`, the slot children are passed to
+    /// `view()` and the returned tree becomes the node's children.
+    /// Otherwise, falls back to the component's `children()` method.
+    ///
+    /// Requires `&mut self` because it sets `node.uses_view` so that
+    /// `measure_height` and `render_node` can skip chrome/insets without
+    /// re-querying the component.
+    fn resolve_children(&mut self, id: NodeId, slot: Option<Elements>) -> Option<Elements> {
+        let uses_view = self.nodes[id].component.uses_view_erased();
+        self.nodes[id].uses_view = uses_view;
+
+        if uses_view {
+            let node = &self.nodes[id];
+            let state = node.state.inner_as_any();
+            let children = slot.unwrap_or_default();
+            Some(node.component.view_erased(state, children))
+        } else {
+            let node = &self.nodes[id];
+            let state = node.state.inner_as_any();
+            node.component.children_erased(state, slot)
+        }
     }
 
     /// Run the component's lifecycle method and apply resulting effects.
@@ -940,9 +990,13 @@ impl Renderer {
         }
 
         let height = if node.is_container() {
-            let insets = node
-                .component
-                .content_inset_erased(node.state.inner_as_any());
+            // View nodes are transparent — no chrome or insets.
+            let insets = if node.uses_view {
+                Insets::ZERO
+            } else {
+                node.component
+                    .content_inset_erased(node.state.inner_as_any())
+            };
             let inner_width = width.saturating_sub(insets.horizontal());
 
             let children: Vec<NodeId> = node.children.clone();
@@ -1049,14 +1103,22 @@ impl Renderer {
         }
 
         if is_container {
-            // Render the container's own component first (background/border/chrome)
-            let state = self.nodes[id].state.inner_as_any();
-            self.nodes[id].component.render_erased(area, buffer, state);
+            let uses_view = self.nodes[id].uses_view;
 
-            // Compute inner area for children using content insets
-            let insets = self.nodes[id]
-                .component
-                .content_inset_erased(self.nodes[id].state.inner_as_any());
+            // View nodes are transparent — skip chrome rendering.
+            if !uses_view {
+                let state = self.nodes[id].state.inner_as_any();
+                self.nodes[id].component.render_erased(area, buffer, state);
+            }
+
+            // View nodes have no insets — layout is in the tree.
+            let insets = if uses_view {
+                Insets::ZERO
+            } else {
+                self.nodes[id]
+                    .component
+                    .content_inset_erased(self.nodes[id].state.inner_as_any())
+            };
             let inner = Rect::new(
                 area.x.saturating_add(insets.left),
                 area.y.saturating_add(insets.top),
@@ -4066,5 +4128,243 @@ mod tests {
         let consumer_id = r.find_by_key(provider_id, "consumer").unwrap();
         let state = r.state_mut::<ContextConsumer>(consumer_id);
         assert_eq!(state.received.as_deref(), Some("v2"));
+    }
+
+    // --- view() method tests ---
+
+    #[test]
+    fn view_component_renders_via_canvas() {
+        use crate::components::canvas::Canvas;
+
+        #[derive(Default)]
+        struct MyComp;
+
+        impl Component for MyComp {
+            type State = ();
+
+            fn uses_view(&self) -> bool {
+                true
+            }
+
+            fn view(&self, _state: &(), _children: Elements) -> Elements {
+                let mut els = Elements::new();
+                els.add(Canvas::new(|area: Rect, buf: &mut Buffer| {
+                    let para = Paragraph::new("hello view");
+                    ratatui_core::widgets::Widget::render(para, area, buf);
+                }));
+                els
+            }
+        }
+
+        let mut r = Renderer::new(20);
+        let root = r.root();
+        let mut els = Elements::new();
+        els.add(MyComp);
+        r.rebuild(root, els);
+
+        let frame = r.render();
+        assert_eq!(frame.buffer()[(0, 0)].symbol(), "h"); // "hello view"
+        assert_eq!(frame.buffer()[(5, 0)].symbol(), " ");
+        assert_eq!(frame.buffer()[(6, 0)].symbol(), "v"); // "view"
+    }
+
+    #[test]
+    fn view_component_with_slot_children() {
+        use crate::components::view::View;
+
+        #[derive(Default)]
+        struct Card {
+            title: String,
+        }
+
+        impl Component for Card {
+            type State = ();
+
+            fn uses_view(&self) -> bool {
+                true
+            }
+
+            fn view(&self, _state: &(), children: Elements) -> Elements {
+                let mut els = Elements::new();
+                els.add_with_children(
+                    View {
+                        border: Some(ratatui_widgets::borders::BorderType::Plain),
+                        title: Some(self.title.clone()),
+                        ..View::default()
+                    },
+                    children,
+                );
+                els
+            }
+        }
+
+        crate::impl_slot_children!(Card);
+
+        let mut r = Renderer::new(30);
+        let root = r.root();
+
+        let mut els = Elements::new();
+        let mut card_children = Elements::new();
+        card_children.add(crate::components::text::TextBlock::new().unstyled("inside"));
+        els.add_with_children(
+            Card {
+                title: "My Card".into(),
+            },
+            card_children,
+        );
+        r.rebuild(root, els);
+
+        let frame = r.render();
+        // Top-left corner = border
+        assert_eq!(frame.buffer()[(0, 0)].symbol(), "┌");
+        // Title in top border
+        assert_eq!(frame.buffer()[(1, 0)].symbol(), "M"); // "My Card"
+        // Child content inside border (row 1, col 1)
+        assert_eq!(frame.buffer()[(1, 1)].symbol(), "i"); // "inside"
+    }
+
+    #[test]
+    fn view_component_skips_render_and_inset() {
+        #[derive(Default)]
+        struct Transparent;
+
+        impl Component for Transparent {
+            type State = ();
+
+            fn render(&self, area: Rect, buf: &mut Buffer, _state: &()) {
+                // This should NOT be called
+                buf.set_string(area.x, area.y, "BAD", ratatui_core::style::Style::default());
+            }
+
+            fn content_inset(&self, _state: &()) -> crate::insets::Insets {
+                // Would push content 5 cells in — should be ignored
+                crate::insets::Insets::all(5)
+            }
+
+            fn uses_view(&self) -> bool {
+                true
+            }
+
+            fn view(&self, _state: &(), _children: Elements) -> Elements {
+                let mut els = Elements::new();
+                els.add(crate::components::text::TextBlock::new().unstyled("from view"));
+                els
+            }
+        }
+
+        let mut r = Renderer::new(30);
+        let root = r.root();
+        let mut els = Elements::new();
+        els.add(Transparent);
+        r.rebuild(root, els);
+
+        let frame = r.render();
+        // Content at (0,0) — not pushed in by the 5-cell inset
+        assert_eq!(frame.buffer()[(0, 0)].symbol(), "f"); // "from view"
+        // "BAD" should not appear at (0,0)
+        assert_ne!(frame.buffer()[(0, 0)].symbol(), "B");
+    }
+
+    #[test]
+    fn view_component_reconciles_on_rebuild() {
+        use crate::components::canvas::Canvas;
+
+        #[derive(Default)]
+        struct Counter {
+            label: String,
+        }
+
+        impl Component for Counter {
+            type State = ();
+
+            fn uses_view(&self) -> bool {
+                true
+            }
+
+            fn view(&self, _state: &(), _children: Elements) -> Elements {
+                let label = self.label.clone();
+                let mut els = Elements::new();
+                els.add(Canvas::new(move |area: Rect, buf: &mut Buffer| {
+                    let para = Paragraph::new(label.as_str());
+                    ratatui_core::widgets::Widget::render(para, area, buf);
+                }));
+                els
+            }
+        }
+
+        let mut r = Renderer::new(20);
+        let root = r.root();
+
+        let mut els = Elements::new();
+        els.add(Counter {
+            label: "count: 0".into(),
+        })
+        .key("counter");
+        r.rebuild(root, els);
+
+        let frame = r.render();
+        assert_eq!(frame.buffer()[(7, 0)].symbol(), "0"); // "count: 0"
+
+        // Rebuild with new props
+        let mut els = Elements::new();
+        els.add(Counter {
+            label: "count: 1".into(),
+        })
+        .key("counter");
+        r.rebuild(root, els);
+
+        let frame = r.render();
+        assert_eq!(frame.buffer()[(7, 0)].symbol(), "1"); // "count: 1"
+    }
+
+    #[test]
+    fn view_component_empty_elements_produces_zero_height() {
+        #[derive(Default)]
+        struct Empty;
+
+        impl Component for Empty {
+            type State = ();
+
+            fn uses_view(&self) -> bool {
+                true
+            }
+
+            fn view(&self, _state: &(), _children: Elements) -> Elements {
+                Elements::new()
+            }
+        }
+
+        let mut r = Renderer::new(20);
+        let root = r.root();
+        let mut els = Elements::new();
+        els.add(Empty);
+        r.rebuild(root, els);
+
+        let frame = r.render();
+        assert_eq!(frame.buffer().area.height, 0);
+    }
+
+    #[test]
+    fn legacy_components_still_work_with_view_on_trait() {
+        // Components that don't implement uses_view/view work exactly as before.
+        // Uses append_child (imperative API) — the legacy path.
+        #[derive(Default)]
+        struct OldSchool;
+
+        impl Component for OldSchool {
+            type State = ();
+
+            fn render(&self, area: Rect, buf: &mut Buffer, _state: &()) {
+                let para = Paragraph::new("old school");
+                ratatui_core::widgets::Widget::render(para, area, buf);
+            }
+        }
+
+        let mut r = Renderer::new(20);
+        let root = r.root();
+        r.append_child(root, OldSchool);
+
+        let frame = r.render();
+        assert_eq!(frame.buffer()[(0, 0)].symbol(), "o"); // "old school"
     }
 }

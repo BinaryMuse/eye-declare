@@ -226,7 +226,11 @@ pub trait Component: Send + Sync + 'static {
     /// (probe render). Override [`desired_height`](Component::desired_height)
     /// for components that fill their given area rather than rendering
     /// a fixed amount of content.
-    fn render(&self, area: Rect, buf: &mut Buffer, state: &Self::State);
+    ///
+    /// Components that implement [`view()`](Component::view) typically
+    /// leave this as the default no-op, since rendering is handled by
+    /// the element tree returned from `view()`.
+    fn render(&self, _area: Rect, _buf: &mut Buffer, _state: &Self::State) {}
 
     /// Optional height hint. Return `Some(n)` to declare a fixed height
     /// instead of letting the framework probe-render to measure.
@@ -358,6 +362,55 @@ pub trait Component: Send + Sync + 'static {
     /// - **No children:** Return None for a pure leaf component.
     fn children(&self, _state: &Self::State, slot: Option<Elements>) -> Option<Elements> {
         slot
+    }
+
+    /// Whether this component uses [`view()`](Component::view) to define
+    /// its element tree.
+    ///
+    /// Override to return `true` when implementing `view()`. When true,
+    /// the framework calls `view()` instead of `render()`, `children()`,
+    /// and `content_inset()`, treating this component as a transparent
+    /// container whose rendering is fully expressed in the returned tree.
+    fn uses_view(&self) -> bool {
+        false
+    }
+
+    /// Return the element tree for this component.
+    ///
+    /// Only called when [`uses_view()`](Component::uses_view) returns `true`.
+    /// The `children` parameter contains slot children passed by the parent
+    /// (from `element!` braces or `add_with_children`).
+    ///
+    /// When a component uses `view()`:
+    /// - `render()` is not called (chrome is expressed via [`View`](crate::View)
+    ///   or [`Canvas`](crate::Canvas) in the returned tree)
+    /// - `content_inset()` is not used (insets are part of the tree)
+    /// - `children()` is not called (slot children arrive here directly)
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use eye_declare::{Component, Elements, View, Canvas, element};
+    /// use ratatui_widgets::borders::BorderType;
+    ///
+    /// struct Card { title: String }
+    ///
+    /// impl Component for Card {
+    ///     type State = ();
+    ///
+    ///     fn uses_view(&self) -> bool { true }
+    ///
+    ///     fn view(&self, _state: &(), children: Elements) -> Elements {
+    ///         element! {
+    ///             View(border: BorderType::Rounded, title: self.title.clone()) {
+    ///                 #(children)
+    ///             }
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    fn view(&self, _state: &Self::State, _children: Elements) -> Elements {
+        Elements::new()
     }
 }
 

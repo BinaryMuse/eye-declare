@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use eye_declare::{
-    Application, Component, ControlFlow, Elements, Handle, Hooks, Markdown, TextBlock,
+    Application, Canvas, Component, ControlFlow, Elements, Handle, Hooks, Markdown, TextBlock, View,
 };
 use ratatui_core::{
     buffer::Buffer,
@@ -84,73 +84,51 @@ impl Component for InputBox {
         hooks.use_autofocus();
     }
 
-    fn render(&self, area: Rect, buf: &mut Buffer, _state: &()) {
-        if area.height < 3 || area.width < 4 {
-            return;
-        }
-
-        let w = area.width;
-        let h = area.height;
-
-        // Top border with prompt label
-        let label = format!(" {} ", self.prompt);
-        let label_width = label.len() as u16;
-        let top_right_dashes = w.saturating_sub(3 + label_width);
-        let top_line = format!("┌─{}{}┐", label, "─".repeat(top_right_dashes as usize),);
-        buf.set_string(
-            area.x,
-            area.y,
-            &top_line,
-            Style::default().fg(Color::DarkGray),
-        );
-        // Highlight the label
-        buf.set_style(
-            Rect::new(area.x + 2, area.y, label_width, 1),
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        );
-
-        // Bottom border
-        let bottom_line = format!("└{}┘", "─".repeat((w - 2) as usize));
-        buf.set_string(
-            area.x,
-            area.y + h - 1,
-            &bottom_line,
-            Style::default().fg(Color::DarkGray),
-        );
-
-        // Side borders
-        for y in (area.y + 1)..(area.y + h - 1) {
-            buf.set_string(area.x, y, "│", Style::default().fg(Color::DarkGray));
-            buf.set_string(area.x + w - 1, y, "│", Style::default().fg(Color::DarkGray));
-        }
-
-        // Text content inside border
-        let inner = Rect::new(
-            area.x + 2,
-            area.y + 1,
-            w.saturating_sub(4),
-            h.saturating_sub(2),
-        );
-        if inner.width > 0 && inner.height > 0 {
-            let text_style = Style::default().fg(Color::White);
-            let display = if self.text.is_empty() {
-                Line::from(Span::styled(
-                    "Type a message...",
-                    Style::default()
-                        .fg(Color::DarkGray)
-                        .add_modifier(Modifier::ITALIC),
-                ))
-            } else {
-                Line::from(Span::styled(&self.text, text_style))
-            };
-            Paragraph::new(display).render(inner, buf);
-        }
+    fn uses_view(&self) -> bool {
+        true
     }
 
-    fn desired_height(&self, _width: u16, _state: &()) -> Option<u16> {
-        Some(3) // border-top + content + border-bottom
+    fn view(&self, _state: &(), _children: Elements) -> Elements {
+        // Capture owned data for the Canvas closure
+        let text = self.text.clone();
+
+        let mut view_children = Elements::new();
+        view_children.add(
+            Canvas::new(move |area: Rect, buf: &mut Buffer| {
+                if area.width == 0 || area.height == 0 {
+                    return;
+                }
+                let display = if text.is_empty() {
+                    Line::from(Span::styled(
+                        "Type a message...",
+                        Style::default()
+                            .fg(Color::DarkGray)
+                            .add_modifier(Modifier::ITALIC),
+                    ))
+                } else {
+                    Line::from(Span::styled(&text, Style::default().fg(Color::White)))
+                };
+                Paragraph::new(display).render(area, buf);
+            })
+            .with_height(1),
+        );
+
+        let mut els = Elements::new();
+        els.add_with_children(
+            View {
+                border: Some(eye_declare::BorderType::Plain),
+                border_style: Style::default().fg(Color::DarkGray),
+                title: Some(format!(" {} ", self.prompt)),
+                title_style: Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+                padding_left: Some(eye_declare::Cells(1)),
+                padding_right: Some(eye_declare::Cells(1)),
+                ..View::default()
+            },
+            view_children,
+        );
+        els
     }
 
     fn is_focusable(&self, _state: &()) -> bool {
