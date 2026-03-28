@@ -81,8 +81,11 @@ pub struct View {
     /// Title rendered at the bottom of the View. Most useful with a border.
     pub title_bottom: Option<String>,
 
-    /// Style applied to title text.
+    /// Style applied to the top title text.
     pub title_style: Style,
+
+    /// Style applied to the bottom title text.
+    pub title_bottom_style: Style,
 
     /// Base padding applied to all sides (default 0). Each side uses this
     /// value unless overridden by a side-specific field (`padding_top`, etc.).
@@ -116,6 +119,7 @@ impl Default for View {
             title: None,
             title_bottom: None,
             title_style: Style::default(),
+            title_bottom_style: Style::default(),
             padding: 0,
             padding_top: None,
             padding_bottom: None,
@@ -154,7 +158,7 @@ impl View {
         }
 
         if let Some(ref title) = self.title_bottom {
-            block = block.title_bottom(Line::from(title.as_str()).style(self.title_style));
+            block = block.title_bottom(Line::from(title.as_str()).style(self.title_bottom_style));
         }
 
         let (pt, pr, pb, pl) = self.effective_padding();
@@ -356,6 +360,22 @@ mod tests {
         // Title should appear in top border
         let t = buf.cell((1, 0)).unwrap();
         assert_eq!(t.symbol(), "T");
+    }
+
+    #[test]
+    fn render_with_title_bottom() {
+        let v = View {
+            border: Some(BorderType::Plain),
+            title_bottom: Some("Bottom".into()),
+            ..View::default()
+        };
+        let area = Rect::new(0, 0, 20, 5);
+        let mut buf = Buffer::empty(area);
+        v.render(area, &mut buf, &());
+
+        // Title should appear in bottom border row
+        let b = buf.cell((1, 4)).unwrap();
+        assert_eq!(b.symbol(), "B");
     }
 
     #[test]
