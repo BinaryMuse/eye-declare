@@ -785,6 +785,12 @@ impl Renderer {
         self.nodes[id].hook_cursor = output.cursor_hook;
         self.nodes[id].hook_event = output.event_hook;
         self.nodes[id].hook_capture = output.capture_hook;
+        if let Some(layout) = output.layout {
+            self.nodes[id].layout = layout;
+        }
+        if let Some(wc) = output.width_constraint {
+            self.nodes[id].width_constraint = wc;
+        }
         output.provided
     }
 

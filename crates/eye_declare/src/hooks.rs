@@ -7,8 +7,8 @@ use ratatui_core::layout::Rect;
 use crate::component::{EventResult, Tracked};
 use crate::context::ContextMap;
 use crate::node::{
-    AnyCursorHook, AnyEventHook, Effect, EffectKind, TypedCursorHook, TypedEffectHandler,
-    TypedEventHook,
+    AnyCursorHook, AnyEventHook, Effect, EffectKind, Layout, TypedCursorHook, TypedEffectHandler,
+    TypedEventHook, WidthConstraint,
 };
 
 /// A type-erased context consumer callback.
@@ -29,6 +29,8 @@ pub(crate) type Decomposed<S> = (
     Option<Box<dyn AnyCursorHook>>,
     Option<Box<dyn AnyEventHook>>,
     Option<Box<dyn AnyEventHook>>,
+    Option<Layout>,
+    Option<WidthConstraint>,
 );
 
 /// Effect collector for declarative lifecycle management.
@@ -72,6 +74,8 @@ pub struct Hooks<S: 'static> {
     cursor_hook: Option<Box<dyn AnyCursorHook>>,
     event_hook: Option<Box<dyn AnyEventHook>>,
     capture_hook: Option<Box<dyn AnyEventHook>>,
+    layout: Option<Layout>,
+    width_constraint: Option<WidthConstraint>,
     _marker: PhantomData<S>,
 }
 
@@ -94,6 +98,8 @@ impl<S: Send + Sync + 'static> Hooks<S> {
             cursor_hook: None,
             event_hook: None,
             capture_hook: None,
+            layout: None,
+            width_constraint: None,
             _marker: PhantomData,
         }
     }
@@ -252,9 +258,9 @@ impl<S: Send + Sync + 'static> Hooks<S> {
     pub fn use_event(
         &mut self,
         handler: impl Fn(&crossterm::event::Event, &mut Tracked<S>) -> EventResult
-        + Send
-        + Sync
-        + 'static,
+            + Send
+            + Sync
+            + 'static,
     ) {
         self.event_hook = Some(Box::new(TypedEventHook {
             handler: Box::new(handler),
@@ -269,13 +275,28 @@ impl<S: Send + Sync + 'static> Hooks<S> {
     pub fn use_event_capture(
         &mut self,
         handler: impl Fn(&crossterm::event::Event, &mut Tracked<S>) -> EventResult
-        + Send
-        + Sync
-        + 'static,
+            + Send
+            + Sync
+            + 'static,
     ) {
         self.capture_hook = Some(Box::new(TypedEventHook {
             handler: Box::new(handler),
         }));
+    }
+
+    /// Declare this component's layout direction.
+    ///
+    /// Override the component's [`layout`](crate::Component::layout) trait method.
+    /// Use `Layout::Horizontal` for side-by-side children.
+    pub fn use_layout(&mut self, layout: Layout) {
+        self.layout = Some(layout);
+    }
+
+    /// Declare this component's width constraint within a horizontal parent.
+    ///
+    /// Override the component's [`width_constraint`](crate::Component::width_constraint) trait method.
+    pub fn use_width_constraint(&mut self, constraint: WidthConstraint) {
+        self.width_constraint = Some(constraint);
     }
 
     /// Consume the hooks, returning effects, provided contexts, and consumers.
@@ -290,6 +311,8 @@ impl<S: Send + Sync + 'static> Hooks<S> {
             self.cursor_hook,
             self.event_hook,
             self.capture_hook,
+            self.layout,
+            self.width_constraint,
         )
     }
 }

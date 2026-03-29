@@ -159,6 +159,8 @@ impl<C: Component> AnyComponent for C {
             cursor_hook,
             event_hook,
             capture_hook,
+            layout,
+            width_constraint,
         ) = {
             let state: &C::State = tracked;
             let mut hooks = Hooks::<C::State>::new();
@@ -180,6 +182,8 @@ impl<C: Component> AnyComponent for C {
             cursor_hook,
             event_hook,
             capture_hook,
+            layout,
+            width_constraint,
         }
     }
 }
@@ -319,6 +323,8 @@ pub(crate) struct LifecycleOutput {
     pub cursor_hook: Option<Box<dyn AnyCursorHook>>,
     pub event_hook: Option<Box<dyn AnyEventHook>>,
     pub capture_hook: Option<Box<dyn AnyEventHook>>,
+    pub layout: Option<Layout>,
+    pub width_constraint: Option<WidthConstraint>,
 }
 
 /// A registered effect for a node.
