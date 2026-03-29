@@ -264,8 +264,11 @@ pub(crate) trait AnyEventHook: Send + Sync {
     ) -> crate::component::EventResult;
 }
 
-type EventHookFn<S> =
-    Box<dyn Fn(&crossterm::event::Event, &mut S) -> crate::component::EventResult + Send + Sync>;
+type EventHookFn<S> = Box<
+    dyn Fn(&crossterm::event::Event, &mut Tracked<S>) -> crate::component::EventResult
+        + Send
+        + Sync,
+>;
 
 /// Typed wrapper for a hook-declared event handler.
 pub(crate) struct TypedEventHook<S: 'static> {
@@ -279,8 +282,7 @@ impl<S: Send + Sync + 'static> AnyEventHook for TypedEventHook<S> {
         tracked_state: &mut dyn Any,
     ) -> crate::component::EventResult {
         if let Some(tracked) = tracked_state.downcast_mut::<Tracked<S>>() {
-            use std::ops::DerefMut;
-            (self.handler)(event, tracked.deref_mut())
+            (self.handler)(event, tracked)
         } else {
             crate::component::EventResult::Ignored
         }

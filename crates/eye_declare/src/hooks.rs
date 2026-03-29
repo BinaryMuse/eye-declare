@@ -247,11 +247,14 @@ impl<S: Send + Sync + 'static> Hooks<S> {
     /// to stop propagation. This overrides the component's
     /// [`handle_event`](crate::Component::handle_event) trait method.
     ///
-    /// The handler receives `&mut S` (not `&mut Tracked<S>`) — mutations
-    /// automatically mark the component dirty.
+    /// The handler receives `&mut Tracked<S>` — only mutations through
+    /// `DerefMut` mark the component dirty, matching the trait API behavior.
     pub fn use_event(
         &mut self,
-        handler: impl Fn(&crossterm::event::Event, &mut S) -> EventResult + Send + Sync + 'static,
+        handler: impl Fn(&crossterm::event::Event, &mut Tracked<S>) -> EventResult
+        + Send
+        + Sync
+        + 'static,
     ) {
         self.event_hook = Some(Box::new(TypedEventHook {
             handler: Box::new(handler),
@@ -265,7 +268,10 @@ impl<S: Send + Sync + 'static> Hooks<S> {
     /// prevent the event from reaching the focused component.
     pub fn use_event_capture(
         &mut self,
-        handler: impl Fn(&crossterm::event::Event, &mut S) -> EventResult + Send + Sync + 'static,
+        handler: impl Fn(&crossterm::event::Event, &mut Tracked<S>) -> EventResult
+        + Send
+        + Sync
+        + 'static,
     ) {
         self.capture_hook = Some(Box::new(TypedEventHook {
             handler: Box::new(handler),

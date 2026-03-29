@@ -68,28 +68,67 @@ pub fn component_impl(attr: TokenStream, input: TokenStream) -> syn::Result<Toke
         .map(|s| quote! { #s })
         .unwrap_or_else(|| quote! { () });
 
-    // Determine which parameters the function expects by checking the arg count.
-    // The function can have 1-4 parameters in this order:
-    //   props: &PropsType
-    //   state: &StateType        (if state specified)
-    //   hooks: &mut Hooks<State> (optional)
-    //   children: Elements       (if children specified)
-    //
-    // We generate the call sites based on what was declared in the attribute.
+    // Detect parameters by name. Expected order:
+    //   props: &PropsType          (always, any name)
+    //   state: &StateType          (if state specified, any name)
+    //   hooks: &mut Hooks<State>   (optional, detected by name "hooks")
+    //   children: Elements         (if children specified, detected by name "children")
     let has_state = args.state.is_some();
     let has_children = args.children.is_some();
 
-    // Detect if function has a hooks parameter by checking arg count.
-    // Min args: props (1). Max: props + state + hooks + children (4).
-    let param_count = func.sig.inputs.len();
-    let expected_min = 1 + has_state as usize + has_children as usize;
-    let expected_max = expected_min + 1; // +1 for optional hooks
-    let has_hooks = param_count == expected_max;
+    // Extract parameter names for validation
+    let param_names: Vec<String> = func
+        .sig
+        .inputs
+        .iter()
+        .filter_map(|arg| {
+            if let syn::FnArg::Typed(pat_type) = arg
+                && let syn::Pat::Ident(ident) = pat_type.pat.as_ref()
+            {
+                return Some(ident.ident.to_string());
+            }
+            None
+        })
+        .collect();
+    let param_count = param_names.len();
 
-    if param_count < expected_min || param_count > expected_max {
+    // Detect hooks by scanning for a parameter named "hooks"
+    let has_hooks = param_names.iter().any(|n| n == "hooks");
+
+    let expected = 1 + has_state as usize + has_hooks as usize + has_children as usize;
+    if param_count != expected {
+        let mut expected_params = vec!["props"];
+        if has_state {
+            expected_params.push("state");
+        }
+        if has_hooks {
+            expected_params.push("hooks");
+        }
+        if has_children {
+            expected_params.push("children");
+        }
         return Err(syn::Error::new_spanned(
             &func.sig,
-            format!("expected {expected_min}-{expected_max} parameters, found {param_count}"),
+            format!(
+                "expected {} parameters ({}), found {param_count}",
+                expected,
+                expected_params.join(", "),
+            ),
+        ));
+    }
+
+    // Validate children parameter matches attribute declaration
+    let has_children_param = param_names.iter().any(|n| n == "children");
+    if has_children && !has_children_param {
+        return Err(syn::Error::new_spanned(
+            &func.sig,
+            "attribute declares `children` but function has no `children` parameter",
+        ));
+    }
+    if !has_children && has_children_param {
+        return Err(syn::Error::new_spanned(
+            &func.sig,
+            "function has `children` parameter but attribute doesn't declare `children = Type`",
         ));
     }
 
@@ -149,26 +188,21 @@ pub fn component_impl(attr: TokenStream, input: TokenStream) -> syn::Result<Toke
         }
     };
 
-    // Generate ChildCollector
+    // Generate ChildCollector for slot children
     let child_collector = match &args.children {
         Some(child_type) if child_type == "Elements" => {
-            // Slot children
             quote! {
                 ::eye_declare::impl_slot_children!(#props_type);
             }
         }
         Some(child_type) => {
-            // Data children
-            quote! {
-                impl ::eye_declare::ChildCollector for #props_type {
-                    type Collector = ::eye_declare::DataChildren<#child_type>;
-                    type Output = #props_type;
-
-                    fn finish(self, _collector: ::eye_declare::DataChildren<#child_type>) -> #props_type {
-                        self
-                    }
-                }
-            }
+            return Err(syn::Error::new_spanned(
+                child_type,
+                format!(
+                    "only `children = Elements` is currently supported; \
+                     data children (`children = {child_type}`) require additional design"
+                ),
+            ));
         }
         None => quote! {},
     };
