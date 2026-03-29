@@ -258,9 +258,9 @@ impl<S: Send + Sync + 'static> Hooks<S> {
     pub fn use_event(
         &mut self,
         handler: impl Fn(&crossterm::event::Event, &mut Tracked<S>) -> EventResult
-            + Send
-            + Sync
-            + 'static,
+        + Send
+        + Sync
+        + 'static,
     ) {
         self.event_hook = Some(Box::new(TypedEventHook {
             handler: Box::new(handler),
@@ -275,9 +275,9 @@ impl<S: Send + Sync + 'static> Hooks<S> {
     pub fn use_event_capture(
         &mut self,
         handler: impl Fn(&crossterm::event::Event, &mut Tracked<S>) -> EventResult
-            + Send
-            + Sync
-            + 'static,
+        + Send
+        + Sync
+        + 'static,
     ) {
         self.capture_hook = Some(Box::new(TypedEventHook {
             handler: Box::new(handler),

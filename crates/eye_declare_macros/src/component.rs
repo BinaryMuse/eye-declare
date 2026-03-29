@@ -1,6 +1,6 @@
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{parse2, Ident, ItemFn, Token};
+use syn::{Ident, ItemFn, Token, parse2};
 
 /// Check if a type matches `&mut Hooks<T>` for some `T`.
 ///
