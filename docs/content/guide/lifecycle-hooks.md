@@ -195,14 +195,71 @@ impl Component for StatusLog {
 }
 ```
 
+## Behavioral hooks
+
+In addition to lifecycle effects, hooks can declare behavioral capabilities
+for the component. These override the equivalent Component trait methods:
+
+### use_focusable
+
+Declares whether this component participates in Tab cycling:
+
+```rust
+hooks.use_focusable(true);
+```
+
+### use_cursor
+
+Declares where to position the terminal cursor when this component has focus:
+
+```rust
+hooks.use_cursor(|area: Rect, state: &MyState| {
+    Some((area.x + state.cursor_col, area.y))
+});
+```
+
+Return `None` to hide the cursor.
+
+### use_event
+
+Declares a bubble-phase event handler (focused → root):
+
+```rust
+hooks.use_event(|event: &crossterm::event::Event, state: &mut MyState| {
+    if let Event::Key(key) = event {
+        state.handle_key(key);
+        EventResult::Consumed
+    } else {
+        EventResult::Ignored
+    }
+});
+```
+
+### use_event_capture
+
+Declares a capture-phase event handler (root → focused). Fires before
+the bubble phase — return `Consumed` to prevent the event from reaching
+the focused component:
+
+```rust
+hooks.use_event_capture(|event, state: &mut MyState| {
+    // Global shortcut handling
+    EventResult::Ignored
+});
+```
+
 ## Hook reference
 
-| Hook | Fires when | Receives |
-|------|------------|----------|
-| `use_interval(duration, handler)` | Periodically during tick cycle | `&mut State` |
-| `use_mount(handler)` | Once, after first build | `&mut State` |
-| `use_unmount(handler)` | Once, when component removed | `&mut State` |
-| `use_autofocus()` | Requests focus on mount | — |
-| `use_focus_scope()` | Creates a focus scope boundary | — |
-| `provide_context(value)` | Makes value available to descendants | — |
-| `use_context::<T>(handler)` | After lifecycle returns | `Option<&T>, &mut Tracked<S>` |
+| Hook | Purpose | Receives |
+|------|---------|----------|
+| `use_interval(duration, handler)` | Periodic callback | `&mut State` |
+| `use_mount(handler)` | Fire on first build | `&mut State` |
+| `use_unmount(handler)` | Fire on removal | `&mut State` |
+| `use_autofocus()` | Request focus on mount | — |
+| `use_focus_scope()` | Create focus scope boundary | — |
+| `use_focusable(bool)` | Participate in Tab cycling | — |
+| `use_cursor(handler)` | Position cursor when focused | `Rect, &State` → `Option<(u16, u16)>` |
+| `use_event(handler)` | Handle events (bubble phase) | `&Event, &mut State` → `EventResult` |
+| `use_event_capture(handler)` | Handle events (capture phase) | `&Event, &mut State` → `EventResult` |
+| `provide_context(value)` | Make value available to descendants | — |
+| `use_context::<T>(handler)` | Read ancestor context | `Option<&T>, &mut Tracked<S>` |
