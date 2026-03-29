@@ -6,8 +6,8 @@ use ratatui_core::{
     widgets::Widget,
 };
 
-use crate::component::Component;
-use crate::wrap;
+use crate::components::Canvas;
+use crate::Elements;
 
 /// Renders a subset of Markdown as styled terminal text.
 ///
@@ -96,20 +96,17 @@ impl Default for MarkdownState {
     }
 }
 
-impl Component for Markdown {
-    type State = MarkdownState;
-
-    fn render(&self, area: Rect, buf: &mut Buffer, state: &Self::State) {
-        if self.source.is_empty() || area.width == 0 || area.height == 0 {
-            return;
-        }
-        let text = render_markdown(&self.source, state);
-        wrap::wrapping_paragraph(text).render(area, buf);
+#[eye_declare_macros::component(props = Markdown, state = MarkdownState, initial_state = MarkdownState::new(), crate_path = crate)]
+fn markdown(props: &Markdown, state: &MarkdownState) -> Elements {
+    if props.source.is_empty() {
+        return Elements::new();
     }
-
-    fn initial_state(&self) -> Option<MarkdownState> {
-        Some(MarkdownState::new())
-    }
+    let text = render_markdown(&props.source, state);
+    let mut els = Elements::new();
+    els.add(Canvas::new(move |area: Rect, buf: &mut Buffer| {
+        crate::wrap::wrapping_paragraph(text.clone()).render(area, buf);
+    }));
+    els
 }
 
 /// Parse markdown source into styled ratatui Text.
@@ -232,7 +229,7 @@ fn parse_inline_formatting(line: &str, styles: &MarkdownState) -> Vec<Span<'stat
             }
         } else if ch == '*' && chars.peek() == Some(&'*') {
             chars.next(); // consume second *
-            // Flush accumulated plain text
+                          // Flush accumulated plain text
             if !current.is_empty() {
                 spans.push(Span::styled(
                     std::mem::take(&mut current),
@@ -302,37 +299,31 @@ mod tests {
     #[test]
     fn heading_renders() {
         let md = Markdown::new("# Title");
-        let state = md.initial_state().unwrap();
+        let state = MarkdownState::new();
         let text = render_markdown(&md.source, &state);
         assert_eq!(text.lines.len(), 1);
-        assert!(
-            text.lines[0]
-                .spans
-                .iter()
-                .any(|s| s.content.contains("Title"))
-        );
+        assert!(text.lines[0]
+            .spans
+            .iter()
+            .any(|s| s.content.contains("Title")));
     }
 
     #[test]
     fn code_block_indented() {
         let md = Markdown::new("```rust\nfn main() {}\n```");
-        let state = md.initial_state().unwrap();
+        let state = MarkdownState::new();
         let text = render_markdown(&md.source, &state);
-        // Should have language hint + code line
         assert!(text.lines.len() >= 2);
-        // Code should be indented
         assert!(text.lines.last().unwrap().to_string().contains("fn main"));
     }
 
     #[test]
     fn inline_bold() {
         let md = Markdown::new("This is **bold** text");
-        let state = md.initial_state().unwrap();
+        let state = MarkdownState::new();
         let text = render_markdown(&md.source, &state);
         let spans = &text.lines[0].spans;
-        // Should have at least 3 spans: "This is ", "bold", " text"
         assert!(spans.len() >= 3);
-        // Bold span should have BOLD modifier
         let bold_span = spans.iter().find(|s| s.content.contains("bold")).unwrap();
         assert!(bold_span.style.add_modifier.contains(Modifier::BOLD));
     }
@@ -340,7 +331,7 @@ mod tests {
     #[test]
     fn inline_italic() {
         let md = Markdown::new("This is *italic* text");
-        let state = md.initial_state().unwrap();
+        let state = MarkdownState::new();
         let text = render_markdown(&md.source, &state);
         let spans = &text.lines[0].spans;
         let italic_span = spans.iter().find(|s| s.content.contains("italic")).unwrap();
@@ -350,7 +341,7 @@ mod tests {
     #[test]
     fn inline_code() {
         let md = Markdown::new("Use `println!` here");
-        let state = md.initial_state().unwrap();
+        let state = MarkdownState::new();
         let text = render_markdown(&md.source, &state);
         let spans = &text.lines[0].spans;
         let code_span = spans
@@ -363,7 +354,7 @@ mod tests {
     #[test]
     fn list_items() {
         let md = Markdown::new("- item one\n- item two");
-        let state = md.initial_state().unwrap();
+        let state = MarkdownState::new();
         let text = render_markdown(&md.source, &state);
         assert_eq!(text.lines.len(), 2);
     }
@@ -371,9 +362,8 @@ mod tests {
     #[test]
     fn unclosed_markers_render_as_text() {
         let md = Markdown::new("This has an unclosed **bold");
-        let state = md.initial_state().unwrap();
+        let state = MarkdownState::new();
         let text = render_markdown(&md.source, &state);
-        // Should render without panic, showing ** as literal text
         let full_text: String = text.lines[0]
             .spans
             .iter()
@@ -387,9 +377,8 @@ mod tests {
         let md = Markdown::new(
             "# Welcome\n\nThis is **bold** and *italic* with `code`.\n\n```\nlet x = 1;\n```\n\n- item",
         );
-        let state = md.initial_state().unwrap();
+        let state = MarkdownState::new();
         let text = render_markdown(&md.source, &state);
-        // Should have: heading, blank, paragraph, blank, code, blank, list item
         assert!(text.lines.len() >= 5);
     }
 }

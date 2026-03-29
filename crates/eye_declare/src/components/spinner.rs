@@ -9,7 +9,8 @@ use ratatui_widgets::paragraph::Paragraph;
 
 use std::time::Duration;
 
-use crate::component::Component;
+use crate::components::Canvas;
+use crate::element::Elements;
 use crate::hooks::Hooks;
 
 const FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -103,6 +104,43 @@ impl Spinner {
         self.done_label = Some(label.into());
         self
     }
+
+    fn build_line(&self, frame: usize) -> Line<'static> {
+        if self.done {
+            let label = self.done_label.as_deref().unwrap_or(&self.label);
+
+            if self.label_first {
+                if self.hide_checkmark {
+                    Line::from(vec![Span::styled(label.to_string(), self.done_label_style)])
+                } else {
+                    Line::from(vec![
+                        Span::styled(label.to_string(), self.done_label_style),
+                        Span::styled("✓ ", self.checkmark_style),
+                    ])
+                }
+            } else {
+                if self.hide_checkmark {
+                    Line::from(vec![Span::styled(label.to_string(), self.done_label_style)])
+                } else {
+                    Line::from(vec![
+                        Span::styled("✓ ", self.checkmark_style),
+                        Span::styled(label.to_string(), self.done_label_style),
+                    ])
+                }
+            }
+        } else {
+            let frame_str = FRAMES[frame % FRAMES.len()];
+            let label = Span::styled(self.label.clone(), self.label_style);
+
+            if self.label_first {
+                let frame = Span::styled(format!(" {}", frame_str), self.spinner_style);
+                Line::from(vec![label, frame])
+            } else {
+                let frame = Span::styled(format!("{} ", frame_str), self.spinner_style);
+                Line::from(vec![frame, label])
+            }
+        }
+    }
 }
 
 /// Internal state for a [`Spinner`] component.
@@ -135,56 +173,19 @@ impl Default for SpinnerState {
     }
 }
 
-impl Component for Spinner {
-    type State = SpinnerState;
-
-    fn render(&self, area: Rect, buf: &mut Buffer, state: &Self::State) {
-        let line = if self.done {
-            let label = self.done_label.as_deref().unwrap_or(&self.label);
-
-            if self.label_first {
-                if self.hide_checkmark {
-                    Line::from(vec![Span::styled(label.to_string(), self.done_label_style)])
-                } else {
-                    Line::from(vec![
-                        Span::styled(label.to_string(), self.done_label_style),
-                        Span::styled("✓ ", self.checkmark_style),
-                    ])
-                }
-            } else {
-                if self.hide_checkmark {
-                    Line::from(vec![Span::styled(label.to_string(), self.done_label_style)])
-                } else {
-                    Line::from(vec![
-                        Span::styled("✓ ", self.checkmark_style),
-                        Span::styled(label.to_string(), self.done_label_style),
-                    ])
-                }
-            }
-        } else {
-            let frame_str = FRAMES[state.frame % FRAMES.len()];
-            let label = Span::styled(self.label.clone(), self.label_style);
-
-            if self.label_first {
-                let frame = Span::styled(format!(" {}", frame_str), self.spinner_style);
-                Line::from(vec![label, frame])
-            } else {
-                let frame = Span::styled(format!("{} ", frame_str), self.spinner_style);
-                Line::from(vec![frame, label])
-            }
-        };
-        Paragraph::new(line).render(area, buf);
+#[eye_declare_macros::component(props = Spinner, state = SpinnerState, initial_state = SpinnerState::new(), crate_path = crate)]
+fn spinner(props: &Spinner, state: &SpinnerState, hooks: &mut Hooks<SpinnerState>) -> Elements {
+    if !props.done {
+        hooks.use_interval(Duration::from_millis(80), |s| s.tick());
     }
 
-    fn initial_state(&self) -> Option<SpinnerState> {
-        Some(SpinnerState::new())
-    }
+    let line = props.build_line(state.frame);
 
-    fn lifecycle(&self, hooks: &mut Hooks<SpinnerState>, _state: &SpinnerState) {
-        if !self.done {
-            hooks.use_interval(Duration::from_millis(80), |s| s.tick());
-        }
-    }
+    let mut els = Elements::new();
+    els.add(Canvas::new(move |area: Rect, buf: &mut Buffer| {
+        Paragraph::new(line.clone()).render(area, buf);
+    }));
+    els
 }
 
 #[cfg(test)]
@@ -194,20 +195,22 @@ mod tests {
     #[test]
     fn spinner_renders_frame() {
         let spinner = Spinner::new("Loading...");
-        let state = spinner.initial_state().unwrap();
+        let state = SpinnerState::new();
+        let line = spinner.build_line(state.frame);
         let area = Rect::new(0, 0, 20, 1);
         let mut buf = Buffer::empty(area);
-        spinner.render(area, &mut buf, &state);
+        Paragraph::new(line).render(area, &mut buf);
         assert_eq!(buf[(0, 0)].symbol(), "⠋");
     }
 
     #[test]
     fn spinner_done_shows_checkmark() {
         let spinner = Spinner::new("Loading...").done("Done!");
-        let state = spinner.initial_state().unwrap();
+        let state = SpinnerState::new();
+        let line = spinner.build_line(state.frame);
         let area = Rect::new(0, 0, 20, 1);
         let mut buf = Buffer::empty(area);
-        spinner.render(area, &mut buf, &state);
+        Paragraph::new(line).render(area, &mut buf);
         assert_eq!(buf[(0, 0)].symbol(), "✓");
     }
 

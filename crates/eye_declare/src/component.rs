@@ -403,137 +403,91 @@ pub trait Component: Send + Sync + 'static {
     }
 }
 
-/// Vertical stack container — children render top-to-bottom.
+/// Vertical stack container.
 ///
-/// `VStack` renders nothing itself; it exists purely to group children.
-/// Each child receives the full parent width and its own measured height.
-///
-/// This is the default layout direction and the implicit root of every
-/// renderer. Use it explicitly when you need a named group:
+/// Children are laid out top-to-bottom, each receiving the full
+/// parent width. This is the default layout — [`VStack`] is mainly
+/// used for explicit grouping or to anchor a keyed subtree.
 ///
 /// ```ignore
 /// element! {
 ///     VStack {
-///         Spinner(label: "Step 1...")
-///         Spinner(label: "Step 2...")
+///         TextBlock("Hello")
+///         TextBlock("World")
 ///     }
 /// }
 /// ```
-#[derive(Default)]
+#[derive(Debug, Default, Clone)]
 pub struct VStack;
 
 impl VStack {
-    /// Builder for element! macro compatibility.
     pub fn builder() -> Self {
         Self
     }
 
-    /// Finalize builder (no-op for fieldless types).
     pub fn build(self) -> Self {
         self
     }
 }
 
-impl Component for VStack {
-    type State = ();
-
-    fn render(&self, _area: Rect, _buf: &mut Buffer, _state: &()) {}
+#[eye_declare_macros::component(props = VStack, children = Elements, crate_path = crate)]
+fn vstack(_props: &VStack, children: Elements) -> Elements {
+    children
 }
 
-impl_slot_children!(VStack);
-
-/// Horizontal stack container — children render left-to-right.
+/// Horizontal stack container.
 ///
-/// `HStack` renders nothing itself; it lays children out horizontally.
-/// Each child's width is determined by its [`WidthConstraint`]:
-/// [`Fixed(n)`](WidthConstraint::Fixed) reserves exactly `n` columns,
-/// while [`Fill`](WidthConstraint::Fill) (the default) splits remaining
-/// space equally among all `Fill` siblings.
+/// Children are laid out left-to-right. Use [`Column`] inside to
+/// control individual child widths.
 ///
 /// ```ignore
 /// element! {
 ///     HStack {
-///         Column(width: Fixed(3)) {
-///             Spinner(label: "")
-///         }
-///         Column {
-///             "Status: OK"
-///         }
+///         Column(width: Fixed(10)) { TextBlock("left") }
+///         Column(width: Fill) { TextBlock("right") }
 ///     }
 /// }
 /// ```
-#[derive(Default)]
+#[derive(Debug, Default, Clone)]
 pub struct HStack;
 
 impl HStack {
-    /// Builder for element! macro compatibility.
     pub fn builder() -> Self {
         Self
     }
 
-    /// Finalize builder (no-op for fieldless types).
     pub fn build(self) -> Self {
         self
     }
 }
 
-impl Component for HStack {
-    type State = ();
-
-    fn render(&self, _area: Rect, _buf: &mut Buffer, _state: &()) {}
-
-    fn layout(&self) -> Layout {
-        Layout::Horizontal
-    }
+#[eye_declare_macros::component(props = HStack, children = Elements, crate_path = crate)]
+fn hstack(_props: &HStack, hooks: &mut Hooks<()>, children: Elements) -> Elements {
+    hooks.use_layout(Layout::Horizontal);
+    children
 }
 
-impl_slot_children!(HStack);
-
-/// A width-constrained wrapper for children inside an [`HStack`].
-///
-/// `Column` renders nothing itself — it passes children through and
-/// declares a [`WidthConstraint`] that the `HStack` uses for layout.
-/// Defaults to [`Fill`](WidthConstraint::Fill) if no width is specified.
+/// Width-constrained wrapper for use inside [`HStack`].
 ///
 /// ```ignore
 /// element! {
 ///     HStack {
-///         Column(width: Fixed(20)) {
-///             "Sidebar"
-///         }
-///         Column {
-///             // Fill: takes remaining width
-///             "Main content"
-///         }
+///         Column(width: Fixed(10)) { TextBlock("fixed") }
+///         Column(width: Fill) { TextBlock("flexible") }
 ///     }
 /// }
 /// ```
-#[derive(typed_builder::TypedBuilder)]
+#[derive(Debug, Default, Clone, typed_builder::TypedBuilder)]
 pub struct Column {
-    /// The width constraint for this column. Defaults to [`Fill`](WidthConstraint::Fill).
     #[builder(default, setter(into))]
     pub width: WidthConstraint,
 }
 
-impl Default for Column {
-    fn default() -> Self {
-        Self {
-            width: WidthConstraint::Fill,
-        }
-    }
+#[eye_declare_macros::component(props = Column, children = Elements, crate_path = crate)]
+fn column(props: &Column, hooks: &mut Hooks<()>, children: Elements) -> Elements {
+    hooks.use_width_constraint(props.width);
+    children
 }
-
-impl Component for Column {
-    type State = ();
-
-    fn render(&self, _area: Rect, _buf: &mut Buffer, _state: &()) {}
-
-    fn width_constraint(&self) -> WidthConstraint {
-        self.width
-    }
-}
-
-impl_slot_children!(Column);
 
 #[cfg(test)]
 mod tests {

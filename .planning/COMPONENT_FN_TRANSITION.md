@@ -60,12 +60,12 @@ Methods `render()`, `desired_height()`, `content_inset()`, `initial_state()` are
 | `render()` | Return `Canvas` element from `view()` |
 | `desired_height()` | `hooks.use_height_hint(n)` (not yet built) |
 | `content_inset()` | Use `View` wrapper in return tree |
-| `initial_state()` | `Default::default()` or `hooks.use_initial_state()` (not yet built) |
+| `initial_state()` | `initial_state = <expr>` attribute on `#[component]` (Wave 1C) |
 
 ### F2. Hooks can't override everything
 
 Hooks exist for: `use_focusable`, `use_cursor`, `use_event`, `use_event_capture`
-Hooks missing for: `layout()`, `width_constraint()`, `initial_state()`
+Hooks missing for: `content_inset()` (only needed by View, kept as primitive)
 
 ### F3. Function body runs twice per cycle
 
@@ -75,9 +75,9 @@ Hooks missing for: `layout()`, `width_constraint()`, `initial_state()`
 
 `#[component]` only supports `children = Elements`. Components like TextBlock that accept typed data children (`Line`/`Span`) must use manual `ChildCollector` + `DataChildren<T>`.
 
-### F5. Fragile parameter detection
+### F5. ~~Fragile parameter detection~~ (Resolved in Wave 1B)
 
-Hooks parameter detected by name `"hooks"`, not by type `&mut Hooks<T>`.
+Hooks parameter now detected by type `&mut Hooks<T>`.
 
 ### F6. Two parallel paths for slot children
 
@@ -95,15 +95,24 @@ Old: struct + `impl_slot_children!` macro. New: `#[component(children = Elements
 | 1B | Detect hooks parameter by type (`&mut Hooks<T>`) instead of name | Low | Done |
 | 1C | Support `initial_state` in `#[component]` (attribute or hook) | Low-Medium | Done |
 
-### Wave 2 — Migrate built-ins to new model
+### Wave 2 — Migrate built-ins to `#[component]` fn model
 
 | # | Task | Effort | Status |
 |---|------|--------|--------|
-| 2A | Convert VStack/HStack/Column to `#[component]` | Low | Pending |
-| 2B | Convert View to `#[component]` | Medium | Pending |
-| 2C | Convert Spinner to `#[component]` | Medium | Pending |
-| 2D | Convert Canvas to `#[component]` | Medium | Pending |
-| 2E | Convert TextBlock/Line to `#[component]` with data children support | High | Pending |
+| 2A | Convert VStack/HStack/Column to `#[component]` | Low | In Progress |
+| 2B | Convert Spinner to `#[component]` (returns Canvas element) | Medium | In Progress |
+| 2C | Convert Markdown to `#[component]` (returns Canvas element) | Medium | In Progress |
+| 2D | Keep View as hand-written primitive (fundamental building block) | N/A | Done — kept by design |
+| 2E | Keep Canvas as hand-written primitive (fundamental building block) | N/A | Done — kept by design |
+
+> **Design decision**: View and Canvas are hand-written `impl Component` primitives
+> that `#[component]` functions compose *with*. They provide the border/inset and
+> imperative-render escape hatches that all other components build on. There is no
+> benefit to converting them — they are the foundation, not the target.
+
+> **Blocked**: TextBlock/Line/SSpan require `children = DataChildren<T>` support in
+> `#[component]` (Wave 4B). They use the data children pattern, which the macro
+> does not yet support.
 
 ### Wave 3 — Structural simplification (after migration)
 

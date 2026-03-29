@@ -2,12 +2,6 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{Ident, ItemFn, Token, parse2};
 
-/// Check if a type matches `&mut Hooks<T>` for some `T`.
-///
-/// Matches on the last path segment being `"Hooks"`, which is intentionally
-/// loose — it accepts any crate's `Hooks` type. In practice this is fine
-/// because the generated code calls `::eye_declare::Hooks` methods, so a
-/// mismatched type would produce a clear compile error in the generated impl.
 fn is_hooks_type(ty: &syn::Type) -> bool {
     if let syn::Type::Reference(type_ref) = ty
         && type_ref.mutability.is_some()
@@ -23,12 +17,12 @@ fn is_hooks_type(ty: &syn::Type) -> bool {
     }
 }
 
-/// Parsed arguments from `#[component(props = T, state = S, children = C, initial_state = expr)]`.
 struct ComponentArgs {
     props: Ident,
     state: Option<Ident>,
     children: Option<Ident>,
     initial_state: Option<syn::Expr>,
+    crate_path: Option<TokenStream>,
 }
 
 impl syn::parse::Parse for ComponentArgs {
@@ -38,6 +32,7 @@ impl syn::parse::Parse for ComponentArgs {
         let mut children = None;
         let mut initial_state = None;
         let mut initial_state_key_span: Option<proc_macro2::Span> = None;
+        let mut crate_path = None;
 
         while !input.is_empty() {
             let key: Ident = input.parse()?;
@@ -60,6 +55,10 @@ impl syn::parse::Parse for ComponentArgs {
                 "children" => {
                     let value: Ident = input.parse()?;
                     children = Some(value);
+                }
+                "crate_path" => {
+                    let value: TokenStream = input.parse()?;
+                    crate_path = Some(value);
                 }
                 other => {
                     return Err(syn::Error::new_spanned(
@@ -90,17 +89,11 @@ impl syn::parse::Parse for ComponentArgs {
             state,
             children,
             initial_state,
+            crate_path,
         })
     }
 }
 
-/// Implementation of the `#[component]` attribute macro.
-///
-/// Takes a function definition and generates:
-/// 1. The original function (kept as-is)
-/// 2. `impl Component for PropsType` with lifecycle() and view()
-/// 3. `impl_slot_children!` if children = Elements
-/// 4. `ChildCollector` with `DataChildren<T>` if children = other type
 pub fn component_impl(attr: TokenStream, input: TokenStream) -> syn::Result<TokenStream> {
     let args: ComponentArgs = parse2(attr)?;
     let func: ItemFn = parse2(input)?;
@@ -108,24 +101,23 @@ pub fn component_impl(attr: TokenStream, input: TokenStream) -> syn::Result<Toke
     let func_name = &func.sig.ident;
     let props_type = &args.props;
 
-    // State type: defaults to () if not specified
+    let crate_path = args
+        .crate_path
+        .as_ref()
+        .map(|p| quote! { #p })
+        .unwrap_or_else(|| quote! { ::eye_declare });
+
     let state_type = args
         .state
         .as_ref()
         .map(|s| quote! { #s })
         .unwrap_or_else(|| quote! { () });
 
-    // Detect parameters by type. Expected order:
-    //   props: &PropsType          (always, any name)
-    //   state: &StateType          (if state specified, any name)
-    //   hooks: &mut Hooks<State>   (optional, detected by type &mut Hooks<T>)
-    //   children: Elements         (if children specified, detected by name "children")
     let has_state = args.state.is_some();
     let has_children = args.children.is_some();
 
     let param_count = func.sig.inputs.len();
 
-    // Detect hooks by type: &mut Hooks<T>
     let has_hooks = func.sig.inputs.iter().any(|arg| {
         if let syn::FnArg::Typed(pat_type) = arg {
             is_hooks_type(&pat_type.ty)
@@ -156,7 +148,6 @@ pub fn component_impl(attr: TokenStream, input: TokenStream) -> syn::Result<Toke
         ));
     }
 
-    // Validate children parameter matches attribute declaration
     let param_names: Vec<String> = func
         .sig
         .inputs
@@ -184,7 +175,6 @@ pub fn component_impl(attr: TokenStream, input: TokenStream) -> syn::Result<Toke
         ));
     }
 
-    // Build the call arguments for lifecycle() — hooks are real, children are empty
     let lifecycle_call = {
         let mut call_args = vec![quote! { self }];
         if has_state {
@@ -194,19 +184,18 @@ pub fn component_impl(attr: TokenStream, input: TokenStream) -> syn::Result<Toke
             call_args.push(quote! { __hooks });
         }
         if has_children {
-            call_args.push(quote! { ::eye_declare::Elements::new() });
+            call_args.push(quote! { #crate_path::Elements::new() });
         }
         quote! { #func_name(#(#call_args),*) }
     };
 
-    // Build the call arguments for view() — hooks are discarded, children are real
     let view_call = {
         let mut call_args = vec![quote! { self }];
         if has_state {
             call_args.push(quote! { __state });
         }
         if has_hooks {
-            call_args.push(quote! { &mut ::eye_declare::Hooks::new() });
+            call_args.push(quote! { &mut #crate_path::Hooks::new() });
         }
         if has_children {
             call_args.push(quote! { __children });
@@ -223,12 +212,11 @@ pub fn component_impl(attr: TokenStream, input: TokenStream) -> syn::Result<Toke
         None => quote! {},
     };
 
-    // Generate lifecycle() only if hooks are used
     let lifecycle_impl = if has_hooks {
         quote! {
             fn lifecycle(
                 &self,
-                __hooks: &mut ::eye_declare::Hooks<Self::State>,
+                __hooks: &mut #crate_path::Hooks<Self::State>,
                 __state: &Self::State,
             ) {
                 let _ = #lifecycle_call;
@@ -238,22 +226,20 @@ pub fn component_impl(attr: TokenStream, input: TokenStream) -> syn::Result<Toke
         quote! {}
     };
 
-    // Generate view()
     let view_impl = quote! {
         fn view(
             &self,
             __state: &Self::State,
-            __children: ::eye_declare::Elements,
-        ) -> ::eye_declare::Elements {
+            __children: #crate_path::Elements,
+        ) -> #crate_path::Elements {
             #view_call
         }
     };
 
-    // Generate ChildCollector for slot children
     let child_collector = match &args.children {
         Some(child_type) if child_type == "Elements" => {
             quote! {
-                ::eye_declare::impl_slot_children!(#props_type);
+                #crate_path::impl_slot_children!(#props_type);
             }
         }
         Some(child_type) => {
@@ -271,7 +257,7 @@ pub fn component_impl(attr: TokenStream, input: TokenStream) -> syn::Result<Toke
     Ok(quote! {
         #func
 
-        impl ::eye_declare::Component for #props_type {
+        impl #crate_path::Component for #props_type {
             type State = #state_type;
 
             #initial_state_impl
