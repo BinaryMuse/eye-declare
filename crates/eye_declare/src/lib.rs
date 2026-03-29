@@ -252,6 +252,8 @@ pub use ratatui_widgets::borders::BorderType;
 /// }
 /// ```
 #[cfg(feature = "macros")]
+pub use eye_declare_macros::component;
+#[cfg(feature = "macros")]
 pub use eye_declare_macros::element;
 #[cfg(feature = "macros")]
 pub use eye_declare_macros::props;

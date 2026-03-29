@@ -62,8 +62,15 @@ pub struct Hooks<S: 'static> {
     _marker: PhantomData<S>,
 }
 
+impl<S: Send + Sync + 'static> Default for Hooks<S> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<S: Send + Sync + 'static> Hooks<S> {
-    pub(crate) fn new() -> Self {
+    /// Create a new empty hooks instance.
+    pub fn new() -> Self {
         Self {
             effects: Vec::new(),
             autofocus: false,

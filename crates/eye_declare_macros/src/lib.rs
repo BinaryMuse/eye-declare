@@ -95,6 +95,62 @@ fn element_impl(input: proc_macro2::TokenStream) -> syn::Result<proc_macro2::Tok
     Ok(codegen::generate_elements(&nodes))
 }
 
+/// Attribute macro for defining function components.
+///
+/// Generates a [`Component`] impl for the props type, mapping the function
+/// body to `lifecycle()` (for hooks) and `view()` (for the element tree).
+///
+/// # Attributes
+///
+/// - `props = Type` — **required**. The struct that becomes the Component.
+/// - `state = Type` — optional. The component's state type. Defaults to `()`.
+/// - `children = Elements` — optional. Generates `impl_slot_children!`.
+/// - `children = MyChild` — optional. Generates `ChildCollector` with `DataChildren<MyChild>`.
+///
+/// # Example
+///
+/// ```ignore
+/// use eye_declare::{component, props, Component, Elements, Hooks, View, Canvas};
+/// use ratatui_widgets::borders::BorderType;
+///
+/// #[props]
+/// struct CardProps {
+///     title: String,
+///     #[default(true)]
+///     visible: bool,
+/// }
+///
+/// #[component(props = CardProps, children = Elements)]
+/// fn card(props: &CardProps, children: Elements) -> Elements {
+///     if !props.visible {
+///         return Elements::new();
+///     }
+///     let mut els = Elements::new();
+///     els.add_with_children(
+///         View { border: Some(BorderType::Rounded),
+///                title: Some(props.title.clone()),
+///                ..View::default() },
+///         children,
+///     );
+///     els
+/// }
+///
+/// // Usage in element! macro:
+/// element! {
+///     Card(title: "My Card") {
+///         "Card content"
+///     }
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn component(attr: TokenStream, input: TokenStream) -> TokenStream {
+    match component::component_impl(attr.into(), input.into()) {
+        Ok(tokens) => tokens.into(),
+        Err(err) => err.to_compile_error().into(),
+    }
+}
+
 mod codegen;
+mod component;
 mod parse;
 mod props;
