@@ -197,6 +197,7 @@ pub use hooks::Hooks;
 pub use inline::InlineRenderer;
 pub use insets::Insets;
 pub use node::{Layout, NodeId, WidthConstraint};
+pub use typed_builder::TypedBuilder;
 
 // Re-exports for component props
 /// Re-exported from `ratatui_widgets` for use with [`View::border`].
@@ -252,3 +253,5 @@ pub use ratatui_widgets::borders::BorderType;
 /// ```
 #[cfg(feature = "macros")]
 pub use eye_declare_macros::element;
+#[cfg(feature = "macros")]
+pub use eye_declare_macros::props;

@@ -20,11 +20,13 @@ use crate::wrap;
 ///     Span(text: "world".into())
 /// }
 /// ```
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, typed_builder::TypedBuilder)]
 pub struct Span {
     /// The text content of this span.
+    #[builder(default, setter(into))]
     pub text: String,
     /// The style applied to this span's text.
+    #[builder(default, setter(into))]
     pub style: Style,
 }
 
@@ -49,9 +51,10 @@ pub struct Span {
 ///     }
 /// }
 /// ```
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, typed_builder::TypedBuilder)]
 pub struct Line {
     /// The spans that compose this line.
+    #[builder(default, setter(into))]
     pub spans: Vec<Span>,
 }
 
@@ -165,9 +168,11 @@ impl ChildCollector for TextBlock {
 ///     "This becomes a TextBlock automatically"
 /// }
 /// ```
+#[derive(typed_builder::TypedBuilder)]
 pub struct TextBlock {
     /// The logical lines of styled text. Each [`Line`] contains one or more
     /// [`Span`]s. Word wrapping is computed at render time.
+    #[builder(default, setter(into))]
     pub lines: Vec<Line>,
 }
 

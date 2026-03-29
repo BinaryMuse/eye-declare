@@ -124,23 +124,19 @@ fn generate_component(
         }
     }
 
-    // Construct the component
-    let construct = if field_props.is_empty() {
-        quote! { #type_name::default() }
-    } else {
-        let assignments: Vec<TokenStream> = field_props
-            .iter()
-            .map(|p| {
-                let name = &p.name;
-                let value = &p.value;
-                quote! { __c.#name = (#value).into(); }
-            })
-            .collect();
-        quote! {{
-            let mut __c = #type_name::default();
-            #(#assignments)*
-            __c
-        }}
+    // Construct the component via builder pattern.
+    // The type must provide Type::builder() returning a builder with
+    // setter methods for each field and a .build() finalizer.
+    let setters: Vec<TokenStream> = field_props
+        .iter()
+        .map(|p| {
+            let name = &p.name;
+            let value = &p.value;
+            quote! { .#name(#value) }
+        })
+        .collect();
+    let construct = quote! {
+        #type_name::builder() #(#setters)* .build()
     };
 
     // Apply special props

@@ -422,6 +422,18 @@ pub trait Component: Send + Sync + 'static {
 #[derive(Default)]
 pub struct VStack;
 
+impl VStack {
+    /// Builder for element! macro compatibility.
+    pub fn builder() -> Self {
+        Self
+    }
+
+    /// Finalize builder (no-op for fieldless types).
+    pub fn build(self) -> Self {
+        self
+    }
+}
+
 impl Component for VStack {
     type State = ();
 
@@ -452,6 +464,18 @@ impl_slot_children!(VStack);
 /// ```
 #[derive(Default)]
 pub struct HStack;
+
+impl HStack {
+    /// Builder for element! macro compatibility.
+    pub fn builder() -> Self {
+        Self
+    }
+
+    /// Finalize builder (no-op for fieldless types).
+    pub fn build(self) -> Self {
+        self
+    }
+}
 
 impl Component for HStack {
     type State = ();
@@ -484,8 +508,10 @@ impl_slot_children!(HStack);
 ///     }
 /// }
 /// ```
+#[derive(typed_builder::TypedBuilder)]
 pub struct Column {
     /// The width constraint for this column. Defaults to [`Fill`](WidthConstraint::Fill).
+    #[builder(default, setter(into))]
     pub width: WidthConstraint,
 }
 

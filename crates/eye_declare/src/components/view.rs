@@ -65,50 +65,65 @@ pub enum Direction {
 /// A unified layout container with optional borders, padding, and background.
 ///
 /// See the [module-level docs](self) for examples.
+#[derive(typed_builder::TypedBuilder)]
 pub struct View {
     /// Layout direction. Defaults to [`Direction::Column`] (vertical).
+    #[builder(default, setter(into))]
     pub direction: Direction,
 
     /// Border type. `None` means no border (default).
+    #[builder(default, setter(into))]
     pub border: Option<BorderType>,
 
     /// Style applied to the border lines.
+    #[builder(default, setter(into))]
     pub border_style: Style,
 
     /// Title rendered at the top of the View. Most useful with a border.
+    #[builder(default, setter(into))]
     pub title: Option<String>,
 
     /// Title rendered at the bottom of the View. Most useful with a border.
+    #[builder(default, setter(into))]
     pub title_bottom: Option<String>,
 
     /// Style applied to the top title text.
+    #[builder(default, setter(into))]
     pub title_style: Style,
 
     /// Style applied to the bottom title text.
+    #[builder(default, setter(into))]
     pub title_bottom_style: Style,
 
     /// Base padding applied to all sides (default 0). Each side uses this
     /// value unless overridden by a side-specific field (`padding_top`, etc.).
     ///
     /// Accepts bare integer literals in the `element!` macro: `padding: 1`.
+    #[builder(default, setter(into))]
     pub padding: Cells,
 
     /// Padding above content. Overrides `padding` for the top side.
+    #[builder(default, setter(into))]
     pub padding_top: Option<Cells>,
 
     /// Padding below content. Overrides `padding` for the bottom side.
+    #[builder(default, setter(into))]
     pub padding_bottom: Option<Cells>,
 
     /// Padding left of content. Overrides `padding` for the left side.
+    #[builder(default, setter(into))]
     pub padding_left: Option<Cells>,
 
     /// Padding right of content. Overrides `padding` for the right side.
+    #[builder(default, setter(into))]
     pub padding_right: Option<Cells>,
 
     /// Width constraint for this View when inside a [`Direction::Row`] parent.
+    #[builder(default, setter(into))]
     pub width: WidthConstraint,
 
     /// Background/foreground style applied to the entire View area.
+    #[builder(default, setter(into))]
     pub style: Style,
 }
 

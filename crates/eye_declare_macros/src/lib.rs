@@ -45,6 +45,43 @@ use proc_macro::TokenStream;
 ///     })
 /// }
 /// ```
+/// Attribute macro for defining component props with `#[default]` support.
+///
+/// Generates a `Default` impl for the struct. Fields with `#[default(expr)]`
+/// use the given expression; other fields use `Default::default()`.
+///
+/// # Example
+///
+/// ```ignore
+/// use eye_declare::props;
+///
+/// #[props]
+/// struct CardProps {
+///     pub title: String,
+///     #[default(true)]
+///     pub visible: bool,
+///     pub border: Option<BorderType>,
+/// }
+///
+/// // Generates:
+/// // impl Default for CardProps {
+/// //     fn default() -> Self {
+/// //         Self {
+/// //             title: Default::default(),     // ""
+/// //             visible: true,                 // from #[default]
+/// //             border: Default::default(),    // None
+/// //         }
+/// //     }
+/// // }
+/// ```
+#[proc_macro_attribute]
+pub fn props(_attr: TokenStream, input: TokenStream) -> TokenStream {
+    match props::props_impl(input.into()) {
+        Ok(tokens) => tokens.into(),
+        Err(err) => err.to_compile_error().into(),
+    }
+}
+
 #[proc_macro]
 pub fn element(input: TokenStream) -> TokenStream {
     match element_impl(input.into()) {
@@ -60,3 +97,4 @@ fn element_impl(input: proc_macro2::TokenStream) -> syn::Result<proc_macro2::Tok
 
 mod codegen;
 mod parse;
+mod props;

@@ -29,9 +29,10 @@ use crate::wrap;
 ///     Markdown(key: "response", source: response_text.clone())
 /// }
 /// ```
-#[derive(Default)]
+#[derive(Default, typed_builder::TypedBuilder)]
 pub struct Markdown {
     /// The markdown source text to render.
+    #[builder(default, setter(into))]
     pub source: String,
 }
 

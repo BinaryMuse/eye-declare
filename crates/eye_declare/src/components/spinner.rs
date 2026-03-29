@@ -40,25 +40,35 @@ const FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"
 /// All visual aspects are configurable via struct fields:
 /// `label_style`, `spinner_style`, `done_label_style`, `checkmark_style`,
 /// `label_first` (swap label/spinner order), and `hide_checkmark`.
+#[derive(typed_builder::TypedBuilder)]
 pub struct Spinner {
     /// Text displayed next to the spinner animation.
+    #[builder(default, setter(into))]
     pub label: String,
     /// When `true`, the spinner stops animating and shows a checkmark.
+    #[builder(default, setter(into))]
     pub done: bool,
     /// Replacement label shown in the done state. Falls back to `label`
     /// if `None`.
+    #[builder(default, setter(into))]
     pub done_label: Option<String>,
     /// Hide the checkmark symbol in the done state.
+    #[builder(default, setter(into))]
     pub hide_checkmark: bool,
     /// Place the label before the spinner/checkmark instead of after.
+    #[builder(default, setter(into))]
     pub label_first: bool,
     /// Style for the label text while spinning.
+    #[builder(default, setter(into))]
     pub label_style: Style,
     /// Style for the label text in the done state.
+    #[builder(default, setter(into))]
     pub done_label_style: Style,
     /// Style for the animated spinner character.
+    #[builder(default, setter(into))]
     pub spinner_style: Style,
     /// Style for the checkmark in the done state.
+    #[builder(default, setter(into))]
     pub checkmark_style: Style,
 }
 
