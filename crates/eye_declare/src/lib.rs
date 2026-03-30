@@ -41,9 +41,10 @@
 //!
 //! # Core concepts
 //!
-//! - **[`Component`]** — The trait all UI elements implement. Props live on `&self`
-//!   (immutable, set by the parent); internal state lives in the associated `State`
-//!   type, managed by the framework via [`Tracked`] for automatic dirty detection.
+//! - **[`#[component]`](macro@component) + [`#[props]`](macro@props)** — Define
+//!   components as functions. Props are a struct with `#[props]`; the function
+//!   receives props, optional state, hooks, and children, returning an [`Elements`]
+//!   tree. Hooks declare behavioral capabilities (events, focus, intervals).
 //!
 //! - **[`Elements`]** — A list of component descriptions returned by view functions.
 //!   The framework reconciles the new list against the existing tree, preserving
@@ -80,7 +81,7 @@
 //!
 //! # Lifecycle hooks
 //!
-//! Components declare effects in [`Component::lifecycle`] using the [`Hooks`] API:
+//! Components declare effects using the [`Hooks`] API:
 //!
 //! - [`Hooks::use_interval`] — periodic callback (e.g., animation)
 //! - [`Hooks::use_mount`] — fires once after the component is built
@@ -141,7 +142,8 @@ pub mod app;
 /// that accepts data children (like [`TextBlock`] accepts [`Line`]s).
 pub mod children;
 
-/// The [`Component`] trait and built-in container types ([`VStack`], [`HStack`], [`Column`]).
+/// The [`Component`] trait (framework-internal) and built-in containers
+/// ([`VStack`], [`HStack`], [`Column`]).
 pub mod component;
 
 /// Built-in components: [`TextBlock`](components::text::TextBlock),
@@ -155,7 +157,7 @@ pub mod element;
 
 /// Lifecycle hooks for declaring component effects.
 ///
-/// See [`Hooks`] for the API used inside [`Component::lifecycle`].
+/// See [`Hooks`] for the API used inside `#[component]` functions.
 pub mod hooks;
 
 /// The [`InlineRenderer`] — low-level inline rendering engine.
