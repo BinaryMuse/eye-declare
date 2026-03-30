@@ -401,6 +401,26 @@ pub trait Component: Send + Sync + 'static {
     fn view(&self, _state: &Self::State, children: Elements) -> Elements {
         children
     }
+
+    /// Combined lifecycle and view in a single call.
+    ///
+    /// Called by the framework during reconciliation. Collects hooks
+    /// and produces the element tree in one pass, so the component
+    /// function runs exactly once per cycle.
+    ///
+    /// The default implementation calls [`lifecycle()`](Component::lifecycle)
+    /// then [`view()`](Component::view) separately — correct for hand-written
+    /// `impl Component` primitives. The `#[component]` macro overrides this
+    /// to call the user function once with real hooks and real children.
+    fn update(
+        &self,
+        hooks: &mut Hooks<Self::State>,
+        state: &Self::State,
+        children: Elements,
+    ) -> Elements {
+        self.lifecycle(hooks, state);
+        self.view(state, children)
+    }
 }
 
 /// Vertical stack container.

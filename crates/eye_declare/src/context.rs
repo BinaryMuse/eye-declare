@@ -43,3 +43,6 @@ impl ContextMap {
 /// Each entry is a `(TypeId, Option<old_value>)` pair. On pop, the
 /// old value is restored (or the key is removed if `None`).
 pub(crate) type SavedContext = Vec<(TypeId, Option<Box<dyn Any + Send + Sync>>)>;
+
+/// Context values provided by a component for its descendants.
+pub(crate) type ProvidedContexts = Vec<(TypeId, Box<dyn Any + Send + Sync>)>;

@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use ratatui_core::{buffer::Buffer, layout::Rect};
 
 use crate::component::{Component, Tracked};
-use crate::context::ContextMap;
+use crate::context::{ContextMap, ProvidedContexts};
 use crate::element::Elements;
 use crate::hooks::Hooks;
 use crate::insets::Insets;
@@ -61,13 +61,14 @@ pub(crate) trait AnyComponent: Send + Sync {
     fn cursor_position_erased(&self, area: Rect, state: &dyn Any) -> Option<(u16, u16)>;
     fn is_focusable_erased(&self, state: &dyn Any) -> bool;
     fn content_inset_erased(&self, state: &dyn Any) -> Insets;
-    fn view_erased(&self, state: &dyn Any, children: Elements) -> Elements;
     fn width_constraint_erased(&self) -> WidthConstraint;
-    fn lifecycle_erased(
+    /// Combined lifecycle + view: collect hooks and produce element tree in one call.
+    fn update_erased(
         &self,
         tracked_state: &mut dyn Any,
         context: &ContextMap,
-    ) -> LifecycleOutput;
+        children: Elements,
+    ) -> (LifecycleOutput, Elements);
 }
 
 impl<C: Component> AnyComponent for C {
@@ -128,27 +129,28 @@ impl<C: Component> AnyComponent for C {
         self.content_inset(state)
     }
 
-    fn view_erased(&self, state: &dyn Any, children: Elements) -> Elements {
-        let state = state
-            .downcast_ref::<C::State>()
-            .expect("state type mismatch in view_erased");
-        self.view(state, children)
-    }
-
     fn width_constraint_erased(&self) -> WidthConstraint {
         self.width_constraint()
     }
 
-    fn lifecycle_erased(
+    fn update_erased(
         &self,
         tracked_state: &mut dyn Any,
         context: &ContextMap,
-    ) -> LifecycleOutput {
+        children: Elements,
+    ) -> (LifecycleOutput, Elements) {
         let tracked = tracked_state
             .downcast_mut::<Tracked<C::State>>()
-            .expect("state type mismatch in lifecycle_erased");
+            .expect("state type mismatch in update_erased");
 
-        // Phase 1: collect hooks with immutable state reference
+        // Phase 1: call update() with immutable state and fresh hooks
+        let (decomposed, elements) = {
+            let state: &C::State = tracked;
+            let mut hooks = Hooks::<C::State>::new();
+            let elements = self.update(&mut hooks, state, children);
+            (hooks.decompose(), elements)
+        };
+
         let (
             effects,
             autofocus,
@@ -161,30 +163,28 @@ impl<C: Component> AnyComponent for C {
             capture_hook,
             layout,
             width_constraint,
-        ) = {
-            let state: &C::State = tracked;
-            let mut hooks = Hooks::<C::State>::new();
-            self.lifecycle(&mut hooks, state);
-            hooks.decompose()
-        };
+        ) = decomposed;
 
         // Phase 2: run context consumers with mutable tracked state
         for consumer in consumers {
             consumer(context, tracked);
         }
 
-        LifecycleOutput {
-            effects,
-            autofocus,
-            focus_scope,
-            provided,
-            focusable,
-            cursor_hook,
-            event_hook,
-            capture_hook,
-            layout,
-            width_constraint,
-        }
+        (
+            LifecycleOutput {
+                effects,
+                autofocus,
+                focus_scope,
+                provided,
+                focusable,
+                cursor_hook,
+                event_hook,
+                capture_hook,
+                layout,
+                width_constraint,
+            },
+            elements,
+        )
     }
 }
 
@@ -313,12 +313,12 @@ impl<S: Send + Sync + 'static> AnyCursorHook for TypedCursorHook<S> {
     }
 }
 
-/// Output of a lifecycle() call.
+/// Output of the update (lifecycle + view) call.
 pub(crate) struct LifecycleOutput {
     pub effects: Vec<Effect>,
     pub autofocus: bool,
     pub focus_scope: bool,
-    pub provided: Vec<(TypeId, Box<dyn Any + Send + Sync>)>,
+    pub provided: ProvidedContexts,
     pub focusable: Option<bool>,
     pub cursor_hook: Option<Box<dyn AnyCursorHook>>,
     pub event_hook: Option<Box<dyn AnyEventHook>>,

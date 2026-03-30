@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use ratatui_core::{buffer::Buffer, layout::Rect};
 
 use crate::component::{Component, EventResult, Tracked, VStack};
-use crate::context::{ContextMap, SavedContext};
+use crate::context::{ContextMap, ProvidedContexts, SavedContext};
 use crate::element::{ElementEntry, Elements};
 use crate::frame::Frame;
 use crate::node::{
@@ -81,7 +81,7 @@ impl Renderer {
     ///
     /// Note: this resets `layout` and `width_constraint` from the component's
     /// trait methods. When hooks override these (via `use_layout`/`use_width_constraint`),
-    /// `apply_lifecycle` must be called after this to restore the hook values.
+    /// `update_node` must be called after this to restore the hook values.
     /// Every current reconciliation path satisfies this contract.
     pub fn swap_component<C: Component>(&mut self, id: NodeId, component: C) {
         let layout = component.layout();
@@ -675,11 +675,9 @@ impl Renderer {
                     resolve_width_constraint(&self.nodes[old_id], entry.width_constraint);
                 // Guarantee re-render after props update
                 self.nodes[old_id].force_dirty = true;
-                let provided = self.apply_lifecycle(old_id);
+                let (provided, resolved) = self.update_node(old_id, entry.children);
                 let saved = self.push_context(provided);
 
-                // Resolve children: component decides (slot = external children)
-                let resolved = self.resolve_children(old_id, entry.children);
                 if let Some(els) = resolved {
                     self.reconcile_children(old_id, els.into_items());
                 }
@@ -693,12 +691,10 @@ impl Renderer {
                 self.nodes[id].key = entry.key;
                 self.nodes[id].width_constraint =
                     resolve_width_constraint(&self.nodes[id], entry.width_constraint);
-                let provided = self.apply_lifecycle(id);
+                let (provided, resolved) = self.update_node(id, entry.children);
                 self.fire_mount(id);
                 let saved = self.push_context(provided);
 
-                // Resolve children: component decides (slot = external children)
-                let resolved = self.resolve_children(id, entry.children);
                 if let Some(els) = resolved {
                     self.build_elements(id, els);
                 }
@@ -735,11 +731,10 @@ impl Renderer {
             self.nodes[node_id].key = entry.key;
             self.nodes[node_id].width_constraint =
                 resolve_width_constraint(&self.nodes[node_id], entry.width_constraint);
-            let provided = self.apply_lifecycle(node_id);
+            let (provided, resolved) = self.update_node(node_id, entry.children);
             self.fire_mount(node_id);
             let saved = self.push_context(provided);
 
-            let resolved = self.resolve_children(node_id, entry.children);
             if let Some(els) = resolved {
                 self.build_elements(node_id, els);
             }
@@ -748,37 +743,27 @@ impl Renderer {
         }
     }
 
-    /// Resolve children for a node by calling `view()`.
+    /// Run the component's combined update: collect hooks and produce
+    /// the element tree in a single call.
     ///
-    /// Passes slot children (from `add_with_children`) to the component's
-    /// `view()` method. Returns `Some(elements)` if the view produced
-    /// children, `None` if empty (leaf node).
-    fn resolve_children(&self, id: NodeId, slot: Option<Elements>) -> Option<Elements> {
-        let node = &self.nodes[id];
-        let state = node.state.inner_as_any();
+    /// Returns provided context values (for descendants) and resolved
+    /// children elements. Applies lifecycle output (effects, hook
+    /// overrides) to the node.
+    fn update_node(
+        &mut self,
+        id: NodeId,
+        slot: Option<Elements>,
+    ) -> (ProvidedContexts, Option<Elements>) {
         let children = slot.unwrap_or_default();
-        let result = node.component.view_erased(state, children);
-        // Return Some even when empty if the node already has children,
-        // so reconcile_children can tombstone them on transition to empty.
-        if result.is_empty() && node.children.is_empty() {
-            None
-        } else {
-            Some(result)
-        }
-    }
 
-    /// Run the component's lifecycle method and apply resulting effects.
-    ///
-    /// Context consumers declared via `use_context` are executed
-    /// immediately with the current context map. Returns any context
-    /// values the component provides for its descendants.
-    fn apply_lifecycle(&mut self, id: NodeId) -> Vec<(TypeId, Box<dyn Any + Send + Sync>)> {
-        let output = {
+        let (output, result) = {
             let context = &self.context;
             let node = &mut self.nodes[id];
             node.component
-                .lifecycle_erased(node.state.as_any_mut(), context)
+                .update_erased(node.state.as_any_mut(), context, children)
         };
+
+        // Apply lifecycle output
         if output.effects.is_empty() {
             self.effects.remove(&id);
         } else {
@@ -796,7 +781,25 @@ impl Renderer {
         if let Some(wc) = output.width_constraint {
             self.nodes[id].width_constraint = wc;
         }
-        output.provided
+
+        // Return Some even when empty if the node already has children,
+        // so reconcile_children can tombstone them on transition to empty.
+        let elements = if result.is_empty() && self.nodes[id].children.is_empty() {
+            None
+        } else {
+            Some(result)
+        };
+
+        (output.provided, elements)
+    }
+
+    /// Test helper: run update_node for lifecycle side effects only.
+    /// Used by focus scope tests that need hooks applied on imperatively
+    /// built nodes. Returns provided context values.
+    #[cfg(test)]
+    fn apply_lifecycle(&mut self, id: NodeId) -> Vec<(TypeId, Box<dyn Any + Send + Sync>)> {
+        let (provided, _) = self.update_node(id, None);
+        provided
     }
 
     /// Tombstone a node and all its descendants without touching the
@@ -875,10 +878,7 @@ impl Renderer {
 
     /// Push provided context values onto the context map, saving
     /// previous values for later restoration.
-    fn push_context(
-        &mut self,
-        provided: Vec<(TypeId, Box<dyn Any + Send + Sync>)>,
-    ) -> SavedContext {
+    fn push_context(&mut self, provided: ProvidedContexts) -> SavedContext {
         let mut saved = Vec::with_capacity(provided.len());
         for (type_id, value) in provided {
             let old = self.context.insert(type_id, value);

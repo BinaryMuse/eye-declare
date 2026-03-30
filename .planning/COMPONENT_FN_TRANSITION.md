@@ -43,9 +43,9 @@ fn card(props: &CardProps, children: Elements) -> Elements {
 
 ### What #[component] generates
 
-1. `impl Component for PropsStruct` with `view()` and optionally `lifecycle()`
+1. `impl Component for PropsStruct` with `update()` override (combined lifecycle + view)
 2. `impl_slot_children!` if `children = Elements`
-3. The function body is called twice per cycle: once from `lifecycle()` (real hooks, empty children, discard return) and once from `view()` (discardable hooks, real children, use return)
+3. The function body is called **once per cycle** via `update()` with real hooks and real children
 
 ---
 
@@ -67,9 +67,9 @@ Methods `render()`, `desired_height()`, `content_inset()`, `initial_state()` are
 Hooks exist for: `use_focusable`, `use_cursor`, `use_event`, `use_event_capture`
 Hooks missing for: `content_inset()` (only needed by View, kept as primitive)
 
-### F3. Function body runs twice per cycle
+### F3. ~~Function body runs twice per cycle~~ (Resolved in Wave 3B)
 
-`lifecycle()` and `view()` both call the user function with different arguments. Side effects and computations run redundantly.
+Solved by the `update()` trait method. `#[component]` now generates an `update()` override that calls the user function once with real hooks and real children. The default `update()` implementation chains `lifecycle()` then `view()` for backward compatibility with hand-written primitives.
 
 ### F4. Data children not supported
 
@@ -119,7 +119,7 @@ Old: struct + `impl_slot_children!` macro. New: `#[component(children = Elements
 | # | Task | Effort | Status |
 |---|------|--------|--------|
 | 3A | Unify `render()` and `view()` into a single path | High | Pending |
-| 3B | Call function once, not twice — separate hooks collection from view generation | High | Pending |
+| 3B | Call function once, not twice — `update()` combines lifecycle + view | High | Done |
 | 3C | Remove or deprecate legacy trait methods (`render`, `desired_height`, `content_inset`) | Medium | Pending |
 | 3D | Simplify `ChildCollector` / `DataChildren` / `ComponentWithSlot` hierarchy | High | Pending |
 | 3E | Remove struct+impl path entirely; `#[component]` becomes the only way | High | Pending |

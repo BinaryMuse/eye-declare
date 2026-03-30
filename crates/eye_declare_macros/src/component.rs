@@ -175,27 +175,13 @@ pub fn component_impl(attr: TokenStream, input: TokenStream) -> syn::Result<Toke
         ));
     }
 
-    let lifecycle_call = {
+    let update_call = {
         let mut call_args = vec![quote! { self }];
         if has_state {
             call_args.push(quote! { __state });
         }
         if has_hooks {
             call_args.push(quote! { __hooks });
-        }
-        if has_children {
-            call_args.push(quote! { #crate_path::Elements::new() });
-        }
-        quote! { #func_name(#(#call_args),*) }
-    };
-
-    let view_call = {
-        let mut call_args = vec![quote! { self }];
-        if has_state {
-            call_args.push(quote! { __state });
-        }
-        if has_hooks {
-            call_args.push(quote! { &mut #crate_path::Hooks::new() });
         }
         if has_children {
             call_args.push(quote! { __children });
@@ -212,27 +198,14 @@ pub fn component_impl(attr: TokenStream, input: TokenStream) -> syn::Result<Toke
         None => quote! {},
     };
 
-    let lifecycle_impl = if has_hooks {
-        quote! {
-            fn lifecycle(
-                &self,
-                __hooks: &mut #crate_path::Hooks<Self::State>,
-                __state: &Self::State,
-            ) {
-                let _ = #lifecycle_call;
-            }
-        }
-    } else {
-        quote! {}
-    };
-
-    let view_impl = quote! {
-        fn view(
+    let update_impl = quote! {
+        fn update(
             &self,
+            __hooks: &mut #crate_path::Hooks<Self::State>,
             __state: &Self::State,
             __children: #crate_path::Elements,
         ) -> #crate_path::Elements {
-            #view_call
+            #update_call
         }
     };
 
@@ -261,8 +234,7 @@ pub fn component_impl(attr: TokenStream, input: TokenStream) -> syn::Result<Toke
             type State = #state_type;
 
             #initial_state_impl
-            #lifecycle_impl
-            #view_impl
+            #update_impl
         }
 
         #child_collector
