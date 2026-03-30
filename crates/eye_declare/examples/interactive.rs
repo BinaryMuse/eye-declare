@@ -2,7 +2,7 @@ use std::io::{self, Write};
 use std::time::Duration;
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use eye_declare::{Component, EventResult, InlineRenderer, TextBlock, Tracked};
+use eye_declare::{Component, EventResult, InlineRenderer, Text, Tracked};
 use ratatui_core::{
     buffer::Buffer,
     layout::Rect,
@@ -219,28 +219,27 @@ fn main() -> io::Result<()> {
     let mut stdout = io::stdout();
 
     // Header
-    let header = r.push(
-        TextBlock::new()
-            .line(
-                "Interactive Input Demo",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            )
-            .line(
-                "Type a message and press Enter to submit. Ctrl+C to exit.",
-                Style::default().fg(Color::DarkGray),
-            )
-            .unstyled(""),
-    );
+    let header1 = r.push(Text::styled(
+        "Interactive Input Demo",
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    ));
+    let header2 = r.push(Text::styled(
+        "Type a message and press Enter to submit. Ctrl+C to exit.",
+        Style::default().fg(Color::DarkGray),
+    ));
+    let header3 = r.push(Text::unstyled(""));
     flush(&mut r, &mut stdout)?;
-    r.freeze(header);
+    r.freeze(header1);
+    r.freeze(header2);
+    r.freeze(header3);
 
     // Message log
     let log_id = r.push(MessageLog);
 
     // Spacer
-    let _spacer = r.push(TextBlock::new().unstyled(""));
+    let _spacer = r.push(Text::unstyled(""));
 
     // Input field
     let input_id = r.push(Input);

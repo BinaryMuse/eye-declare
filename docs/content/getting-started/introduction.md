@@ -28,7 +28,7 @@ If you've used React, the mental model will feel familiar:
 4. **Reconciliation** — the framework diffs old and new trees, preserving component state across rebuilds
 
 ```rust
-use eye_declare::{element, Application, Elements, Spinner, TextBlock};
+use eye_declare::{element, Application, Elements, Spinner, Text};
 
 struct AppState {
     messages: Vec<String>,
@@ -38,9 +38,7 @@ struct AppState {
 fn view(state: &AppState) -> Elements {
     element! {
         #(for msg in &state.messages {
-            TextBlock {
-                Line { Span(text: msg.clone()) }
-            }
+            Text { Span(text: msg.clone()) }
         })
         #(if state.loading {
             Spinner(label: "Working...")

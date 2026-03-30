@@ -322,7 +322,7 @@ or any rendering the built-in components don't cover.
 
 For primitive components or advanced use cases, you can implement the
 `Component` trait directly. This is how the built-in components (View,
-Canvas, Spinner, TextBlock) are implemented:
+Canvas, Spinner, Text) are implemented:
 
 ```rust
 #[derive(Default, TypedBuilder)]
@@ -357,7 +357,7 @@ which `#[component]` overrides to call your function.
 | `update()` | chains `lifecycle()` → `view()` | `#[component]` overrides this |
 | `view()` | passthrough | Default `update()` calls this |
 | `lifecycle()` | no-op | Default `update()` calls this |
-| `render()` | no-op | Primitives only (View, Canvas, TextBlock) |
+| `render()` | no-op | Primitives only (View, Canvas, Text) |
 | `desired_height()` | `None` | Primitives only; use `use_height_hint` |
 | `content_inset()` | `Insets::ZERO` | Primitives only (View) |
 | `handle_event()` | `Ignored` | Use `use_event` hook |

@@ -32,17 +32,13 @@ struct AppState {
 The view function is a pure function from state to UI. It runs on every state change:
 
 ```rust
-use eye_declare::{element, Elements, Spinner, TextBlock, Line, Span};
+use eye_declare::{element, Elements, Spinner, Text};
 use ratatui_core::style::{Color, Modifier, Style};
 
 fn app_view(state: &AppState) -> Elements {
     element! {
         #(for (text, style) in &state.messages {
-            TextBlock {
-                Line {
-                    Span(text: text.clone(), style: *style)
-                }
-            }
+            Text(style: *style) { Span(text: text.clone()) }
         })
         #(if state.thinking {
             Spinner(label: "Processing...")
@@ -56,7 +52,7 @@ Key things to notice:
 - `element!` returns `Elements` — a list of component descriptions
 - `#(for ...)` iterates over data and produces components for each item
 - `#(if ...)` conditionally includes components
-- `"string literals"` are automatically wrapped in `TextBlock`
+- `"string literals"` are automatically wrapped in `Text`
 - Components accept props with struct-init syntax: `Spinner(label: "...")`
 
 ## Wire up the Application

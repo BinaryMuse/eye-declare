@@ -17,14 +17,14 @@ use std::time::Duration;
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use eye_declare::{
-    Application, BorderType, Canvas, Cells, ControlFlow, Elements, Handle, Hooks, Markdown,
-    TextBlock, View, component, element, props,
+    Application, BorderType, Canvas, Cells, ControlFlow, Elements, Handle, Hooks, Markdown, Span,
+    Text, View, component, element, props,
 };
 use ratatui_core::{
     buffer::Buffer,
     layout::Rect,
     style::{Color, Modifier, Style},
-    text::{Line, Span},
+    text::Line,
     widgets::Widget,
 };
 use ratatui_widgets::paragraph::Paragraph;
@@ -111,14 +111,17 @@ fn input_box(props: &InputBox, hooks: &mut Hooks<()>) -> Elements {
                     return;
                 }
                 let display = if text.is_empty() {
-                    Line::from(Span::styled(
+                    Line::from(ratatui_core::text::Span::styled(
                         "Type a message...",
                         Style::default()
                             .fg(Color::DarkGray)
                             .add_modifier(Modifier::ITALIC),
                     ))
                 } else {
-                    Line::from(Span::styled(&text, Style::default().fg(Color::White)))
+                    Line::from(ratatui_core::text::Span::styled(
+                        &text,
+                        Style::default().fg(Color::White),
+                    ))
                 };
                 Paragraph::new(display).render(area, buf);
             }, height: 1u16)
@@ -158,7 +161,7 @@ fn streaming_dots(
 
     element! {
         Canvas(render_fn: move |area: Rect, buf: &mut Buffer| {
-            let line = Line::from(Span::styled(&dots, Style::default().fg(Color::DarkGray)));
+            let line = Line::from(ratatui_core::text::Span::styled(&dots, Style::default().fg(Color::DarkGray)));
             Paragraph::new(line).render(area, buf);
         })
     }
@@ -174,7 +177,7 @@ fn chat_view(state: &AppState) -> Elements {
             #(message_element(msg))
         })
 
-        TextBlock()
+        Text { "" }
 
         InputBox(key: "input", text: state.input.clone(), cursor: state.cursor, prompt: "You")
     }
@@ -185,14 +188,9 @@ fn message_element(msg: &ChatMessage) -> Elements {
     match &msg.kind {
         MessageKind::User(text) => {
             element! {
-                TextBlock(key: key, lines: vec![
-                    eye_declare::Line {
-                        spans: vec![eye_declare::Span {
-                            text: format!("> {}", text),
-                            style: Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-                        }],
-                    },
-                ])
+                Text(key: key) {
+                    Span(text: format!("> {}", text), style: Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+                }
             }
         }
         MessageKind::Assistant { content, done } => {

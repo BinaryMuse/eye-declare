@@ -18,7 +18,7 @@ For situations where you need synchronous, direct control over the render loop, 
 
 ```rust
 use std::io::{self, Write};
-use eye_declare::{InlineRenderer, Spinner, TextBlock};
+use eye_declare::{InlineRenderer, Spinner, Text};
 
 fn main() -> io::Result<()> {
     let (width, _) = crossterm::terminal::size()?;
@@ -56,7 +56,7 @@ Add a component to the renderer's root:
 
 ```rust
 let id = renderer.push(Spinner::new("Working..."));
-let header_id = renderer.push(TextBlock::new().line("Header", style));
+let header_id = renderer.push(Text::styled("Header", style));
 ```
 
 Returns a `NodeId` for later reference.
@@ -119,7 +119,7 @@ This triggers reconciliation — matched children preserve their state.
 Mark a component as frozen. Frozen components are no longer updated or re-rendered — they remain as static content:
 
 ```rust
-let header = renderer.push(TextBlock::new().line("Header", style));
+let header = renderer.push(Text::styled("Header", style));
 let output = renderer.render();
 stdout.write_all(&output)?;
 renderer.freeze(header);
@@ -180,9 +180,7 @@ fn main() -> io::Result<()> {
 
     // Build UI
     let header = r.push(
-        TextBlock::new()
-            .line("Interactive Demo", Style::default().fg(Color::Cyan))
-            .unstyled(""),
+        Text::styled("Interactive Demo", Style::default().fg(Color::Cyan)),
     );
     flush(&mut r, &mut stdout)?;
     r.freeze(header);

@@ -2,7 +2,7 @@ use std::io::{self, Write};
 use std::time::Duration;
 
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
-use eye_declare::{InlineRenderer, TextBlock};
+use eye_declare::{InlineRenderer, Text};
 use ratatui_core::style::{Color, Modifier, Style};
 
 fn main() -> io::Result<()> {
@@ -11,28 +11,27 @@ fn main() -> io::Result<()> {
     let mut stdout = io::stdout();
 
     // Header
-    let header = r.push(
-        TextBlock::new()
-            .line(
-                "Display-Time Wrapping Demo",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            )
-            .line(
-                format!(
-                    "Terminal width: {} columns — resize to see reflow! Press q or Ctrl+C to exit.",
-                    width
-                ),
-                Style::default().fg(Color::DarkGray),
-            )
-            .unstyled(""),
-    );
+    let header1 = r.push(Text::styled(
+        "Display-Time Wrapping Demo",
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    ));
+    let header2 = r.push(Text::styled(
+        format!(
+            "Terminal width: {} columns — resize to see reflow! Press q or Ctrl+C to exit.",
+            width
+        ),
+        Style::default().fg(Color::DarkGray),
+    ));
+    let header3 = r.push(Text::unstyled(""));
     flush(&mut r, &mut stdout)?;
-    r.freeze(header);
+    r.freeze(header1);
+    r.freeze(header2);
+    r.freeze(header3);
 
     // Long paragraphs that will wrap
-    let _para1 = r.push(TextBlock::new().line(
+    let _para1 = r.push(Text::styled(
         "This is a long paragraph that demonstrates display-time word wrapping. \
              The text is stored as a single logical line, and the framework wraps it \
              at render time based on the current terminal width. Try resizing your \
@@ -41,10 +40,10 @@ fn main() -> io::Result<()> {
         Style::default().fg(Color::White),
     ));
 
-    let spacer1 = r.push(TextBlock::new().unstyled(""));
+    let spacer1 = r.push(Text::unstyled(""));
     r.freeze(spacer1);
 
-    let _para2 = r.push(TextBlock::new().line(
+    let _para2 = r.push(Text::styled(
         "Here's a second paragraph with different styling to show that \
              multiple components each wrap independently. Each component computes \
              its own height based on wrapped line count, and the framework stacks \
@@ -52,23 +51,23 @@ fn main() -> io::Result<()> {
         Style::default().fg(Color::Yellow),
     ));
 
-    let spacer2 = r.push(TextBlock::new().unstyled(""));
+    let spacer2 = r.push(Text::unstyled(""));
     r.freeze(spacer2);
 
-    let _code_block = r.push(
-        TextBlock::new()
-            .line("fn main() {", Style::default().fg(Color::Green))
-            .line(
-                "    println!(\"Short lines like code don't wrap unless the terminal is very narrow.\");",
-                Style::default().fg(Color::Green),
-            )
-            .line("}", Style::default().fg(Color::Green)),
-    );
+    let _code1 = r.push(Text::styled(
+        "fn main() {",
+        Style::default().fg(Color::Green),
+    ));
+    let _code2 = r.push(Text::styled(
+        "    println!(\"Short lines like code don't wrap unless the terminal is very narrow.\");",
+        Style::default().fg(Color::Green),
+    ));
+    let _code3 = r.push(Text::styled("}", Style::default().fg(Color::Green)));
 
-    let spacer3 = r.push(TextBlock::new().unstyled(""));
+    let spacer3 = r.push(Text::unstyled(""));
     r.freeze(spacer3);
 
-    let status = r.push(TextBlock::default());
+    let status = r.push(Text::unstyled(""));
 
     // Initial render
     update_status(&mut r, status, width);
@@ -112,7 +111,7 @@ fn main() -> io::Result<()> {
 fn update_status(r: &mut InlineRenderer, id: eye_declare::NodeId, width: u16) {
     r.swap_component(
         id,
-        TextBlock::new().line(
+        Text::styled(
             format!("Current width: {} columns — press q to exit", width),
             Style::default()
                 .fg(Color::DarkGray)

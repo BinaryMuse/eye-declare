@@ -72,14 +72,12 @@ element! {
         Spinner(key: "status", label: "Loading...")
     })
     #(if !state.loading {
-        TextBlock(key: "status") {
-            Line { Span(text: "Done!".into()) }
-        }
+        Text(key: "status") { "Done!" }
     })
 }
 ```
 
-Even though both use key `"status"`, switching from `Spinner` to `TextBlock` creates a new node because the types differ. The Spinner's state is discarded and a fresh TextBlock is created.
+Even though both use key `"status"`, switching from `Spinner` to `Text` creates a new node because the types differ. The Spinner's state is discarded and a fresh Text is created.
 
 ## State preservation
 
@@ -103,7 +101,7 @@ When a component has children, reconciliation happens recursively:
 ```rust
 element! {
     VStack(key: "root") {
-        TextBlock(key: "header") { ... }
+        Text(key: "header") { "..." }
         #(for item in &state.items {
             ItemComponent(key: item.id.clone(), ...)
         })

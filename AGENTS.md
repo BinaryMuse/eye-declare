@@ -93,7 +93,7 @@ Key source files in `crates/eye_declare/src/`:
 - `hooks.rs` — Lifecycle hooks (use_interval, use_mount, use_unmount, etc.)
 - `context.rs` — Context system for ancestor-to-descendant data passing
 - `children.rs` — Children/slot handling
-- `components/` — Built-in components (TextBlock, Spinner, Markdown, VStack, HStack)
+- `components/` — Built-in components (Text, Spinner, Markdown, VStack, HStack)
 - `wrap.rs` — Word wrapping
 - `escape.rs` — ANSI escape sequence handling
 

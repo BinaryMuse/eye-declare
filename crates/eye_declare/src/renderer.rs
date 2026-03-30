@@ -428,7 +428,7 @@ impl Renderer {
     /// ```ignore
     /// fn my_view(state: &AppState) -> Elements {
     ///     let mut els = Elements::new();
-    ///     els.add(TextBlock::new().unstyled("Hello"));
+    ///     els.add(Text::unstyled("Hello"));
     ///     els
     /// }
     ///
@@ -4338,7 +4338,7 @@ mod tests {
 
         let mut els = Elements::new();
         let mut card_children = Elements::new();
-        card_children.add(crate::components::text::TextBlock::new().unstyled("inside"));
+        card_children.add(crate::components::text::Text::unstyled("inside"));
         els.add_with_children(
             Card {
                 title: "My Card".into(),
@@ -4369,7 +4369,7 @@ mod tests {
 
             fn view(&self, _state: &(), _children: Elements) -> Elements {
                 let mut els = Elements::new();
-                els.add(crate::components::text::TextBlock::new().unstyled("from view"));
+                els.add(crate::components::text::Text::unstyled("from view"));
                 els
             }
         }

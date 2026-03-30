@@ -10,7 +10,7 @@ A declarative, React-like TUI rendering library for Rust, built on [Ratatui](htt
 eye-declare provides a component model for building terminal UIs that render **inline** — content grows into the terminal's native scrollback rather than taking over the full screen. Designed for CLI tools, AI assistants, and interactive prompts where output accumulates and earlier results should remain visible.
 
 ```rust
-use eye_declare::{element, Application, Elements, Spinner, TextBlock};
+use eye_declare::{element, Application, Elements, Spinner, Text};
 
 struct AppState {
     messages: Vec<String>,
@@ -20,9 +20,7 @@ struct AppState {
 fn chat_view(state: &AppState) -> Elements {
     element! {
         #(for msg in &state.messages {
-            TextBlock {
-                Line { Span(text: msg.clone()) }
-            }
+            Text { Span(text: msg.clone()) }
         })
         #(if state.thinking {
             Spinner(key: "thinking", label: "Thinking...")
@@ -73,7 +71,7 @@ async fn main() -> std::io::Result<()> {
 
 ## Reference
 
-- [Built-in Components](/reference/built-in-components) — TextBlock, Spinner, Markdown, VStack, HStack, Column
+- [Built-in Components](/reference/built-in-components) — Text, Spinner, Markdown, VStack, HStack, Column
 - [Terminal Options](/reference/terminal-options) — Ctrl+C behavior, keyboard protocols, bracketed paste
 - [Imperative API](/reference/imperative-api) — InlineRenderer for direct control
 

@@ -1,6 +1,6 @@
 use eye_declare::{
-    BorderType, Column, Direction, Elements, HStack, InlineRenderer, Line, Markdown, Span, Spinner,
-    TextBlock, VStack, View, WidthConstraint, element,
+    BorderType, Column, Direction, Elements, HStack, InlineRenderer, Markdown, Span, Spinner, Text,
+    VStack, View, WidthConstraint, element,
 };
 
 /// Helper: build elements into a renderer and return child count.
@@ -99,11 +99,7 @@ fn conditional_if_else() {
         #(if loading {
             Spinner(label: "loading...")
         } else {
-            TextBlock {
-                Line {
-                    Span(text: "done")
-                }
-            }
+            Text { "done" }
         })
     };
     assert_eq!(child_count(els), 1);
@@ -280,88 +276,68 @@ fn splice_in_loop() {
 }
 
 // ---------------------------------------------------------------------------
-// Data children (TextBlock / Line / Span)
+// Data children (Text / Span)
 // ---------------------------------------------------------------------------
 
 #[test]
-fn text_block_with_line_span_children() {
+fn text_with_span_children() {
     let els = element! {
-        TextBlock {
-            Line {
-                Span(text: "hello")
-            }
+        Text {
+            Span(text: "hello")
         }
     };
-    // TextBlock absorbs data children — appears as a leaf in the element tree
+    // Text absorbs data children — appears as a leaf in the element tree
     assert_eq!(child_count(els), 1);
 }
 
 #[test]
-fn text_block_multiple_lines() {
+fn text_with_multiple_spans() {
     let els = element! {
-        TextBlock {
-            Line {
-                Span(text: "line one")
-            }
-            Line {
-                Span(text: "line two")
-            }
+        Text {
+            Span(text: "span one")
+            Span(text: "span two")
         }
     };
     assert_eq!(child_count(els), 1);
 }
 
 #[test]
-fn text_block_multi_span_line() {
+fn text_multi_styled_spans() {
     use ratatui_core::style::{Color, Style};
 
     let name = "World";
     let els = element! {
-        TextBlock {
-            Line {
-                Span(text: "Hello, ", style: Style::default().fg(Color::Green))
-                Span(text: name.to_string())
-            }
+        Text {
+            Span(text: "Hello, ", style: Style::default().fg(Color::Green))
+            Span(text: name.to_string())
         }
     };
     assert_eq!(child_count(els), 1);
 }
 
 #[test]
-fn text_block_data_children_in_vstack() {
+fn text_data_children_in_vstack() {
     let els = element! {
         VStack {
-            TextBlock {
-                Line {
-                    Span(text: "first")
-                }
-            }
-            TextBlock {
-                Line {
-                    Span(text: "second")
-                }
-            }
+            Text { "first" }
+            Text { "second" }
         }
     };
     let mut r = InlineRenderer::new(40);
     let container = r.push(VStack);
     r.rebuild(container, els);
     let vstack_id = r.children(container)[0];
-    // Two TextBlock leaves
+    // Two Text leaves
     assert_eq!(r.children(vstack_id).len(), 2);
 }
 
 #[test]
-fn text_block_children_with_loop() {
+fn text_children_with_loop() {
     let items = ["alpha", "beta", "gamma"];
     let els = element! {
         VStack {
             #(for item in items {
-                TextBlock {
-                    Line {
-                        Span(text: item.to_string())
-                    }
-                }
+                Text { Span(text: item.to_string()) }
             })
         }
     };
@@ -373,14 +349,10 @@ fn text_block_children_with_loop() {
 }
 
 #[test]
-fn text_block_with_key() {
+fn text_with_key() {
     let els = element! {
         VStack {
-            TextBlock(key: "greeting") {
-                Line {
-                    Span(text: "hello")
-                }
-            }
+            Text(key: "greeting") { "hello" }
         }
     };
     let mut r = InlineRenderer::new(40);
@@ -391,15 +363,9 @@ fn text_block_with_key() {
 }
 
 #[test]
-fn text_block_children_render_content() {
-    // Verify that data children actually flow through to rendered output,
-    // not just that the tree structure is correct.
+fn text_children_render_content() {
     let els = element! {
-        TextBlock {
-            Line {
-                Span(text: "hello")
-            }
-        }
+        Text { "hello" }
     };
 
     let mut r = InlineRenderer::new(40);
@@ -416,15 +382,13 @@ fn text_block_children_render_content() {
 }
 
 #[test]
-fn text_block_multi_span_renders_both() {
+fn text_multi_span_renders_both() {
     use ratatui_core::style::{Color, Style};
 
     let els = element! {
-        TextBlock {
-            Line {
-                Span(text: "foo", style: Style::default().fg(Color::Red))
-                Span(text: "bar")
-            }
+        Text {
+            Span(text: "foo", style: Style::default().fg(Color::Red))
+            Span(text: "bar")
         }
     };
 
@@ -753,7 +717,7 @@ mod props_tests {
         r.rebuild(container, els);
 
         // CardProps wraps children in a bordered View — verify the tree
-        // has the expected structure (CardProps > View > TextBlock)
+        // has the expected structure (CardProps > View > Text > Canvas)
         let card_id = r.children(container)[0];
         let view_id = r.children(card_id)[0];
         let text_id = r.children(view_id)[0];
@@ -761,7 +725,8 @@ mod props_tests {
         assert_eq!(r.children(container).len(), 1, "one card");
         assert_eq!(r.children(card_id).len(), 1, "card has one view child");
         assert_eq!(r.children(view_id).len(), 1, "view has one text child");
-        assert!(r.children(text_id).is_empty(), "text is a leaf");
+        // Text returns a Canvas child (renders via element tree, not render())
+        assert_eq!(r.children(text_id).len(), 1, "text has canvas child");
     }
 }
 

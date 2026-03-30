@@ -29,11 +29,11 @@ fn generate_node(node: &Node) -> TokenStream {
         } => generate_component(type_name, props, children.as_deref()),
 
         Node::Text(lit) => {
+            // String literal sugar: dispatches through AddTo.
+            // In an Elements context → creates a Text component (via AddTo<Elements> for String).
+            // In a DataChildren context → adds as a data child (via Into<T> for String).
             quote! {
-                ::eye_declare::AddTo::add_to(
-                    ::eye_declare::TextBlock::new().unstyled(#lit),
-                    __els,
-                );
+                ::eye_declare::AddTo::add_to(String::from(#lit), __els);
             }
         }
 

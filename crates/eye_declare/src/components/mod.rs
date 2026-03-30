@@ -9,7 +9,7 @@ pub mod canvas;
 pub mod markdown;
 /// Animated spinner component. See [`Spinner`].
 pub mod spinner;
-/// Styled text component with word wrapping. See [`TextBlock`].
+/// Styled text component with word wrapping. See [`Text`](text::Text).
 pub mod text;
 /// Unified layout container. See [`View`].
 pub mod view;
@@ -17,5 +17,5 @@ pub mod view;
 pub use canvas::Canvas;
 pub use markdown::{Markdown, MarkdownState};
 pub use spinner::{Spinner, SpinnerState};
-pub use text::TextBlock;
+pub use text::{Span, Text, TextChild};
 pub use view::{Direction, View};

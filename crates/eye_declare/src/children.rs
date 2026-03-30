@@ -16,9 +16,9 @@ use crate::node::WidthConstraint;
 /// # Implementations
 ///
 /// - **Blanket impl**: any [`Component`] can be added to [`Elements`].
-/// - **Data types**: [`Line`](crate::Line) converts `Into<TextBlockChild>`,
-///   [`Span`](crate::Span) converts `Into<LineChild>`. These produce compile
-///   errors if used in the wrong context.
+/// - **Data types**: [`Span`](crate::Span) converts `Into<TextChild>`,
+///   `String` converts `Into<TextChild>`. These produce compile errors
+///   if used in the wrong context.
 pub trait AddTo<Collector: ?Sized> {
     /// Handle returned after adding. Supports `.key()` / `.width()` chaining.
     type Handle<'a>
@@ -36,6 +36,21 @@ impl<C: Component> AddTo<Elements> for C {
 
     fn add_to(self, els: &mut Elements) -> ElementHandle<'_> {
         els.add(self)
+    }
+}
+
+/// String → Elements: creates a Text component with the string as content.
+///
+/// This powers the `element!` string literal sugar — `"hello"` becomes a
+/// [`Text`](crate::Text) component. The same `AddTo` dispatch also works
+/// inside data children contexts (e.g., `Text { "hello" }`) via the
+/// `Into<TextChild>` blanket impl.
+impl AddTo<Elements> for String {
+    type Handle<'a> = ElementHandle<'a>;
+
+    fn add_to(self, els: &mut Elements) -> ElementHandle<'_> {
+        let text = crate::components::text::Text::unstyled(self);
+        els.add(text)
     }
 }
 
@@ -76,9 +91,9 @@ impl SpliceInto<Elements> for Elements {
 ///   The [`impl_slot_children!`](crate::impl_slot_children) macro does this
 ///   automatically.
 ///
-/// - **Data children** (like [`TextBlock`](crate::TextBlock)):
-///   Use a custom collector type, and `finish` absorbs the collected data
-///   into the component's props.
+/// - **Data children** (like [`Text`](crate::Text)):
+///   Use a custom collector type. For `#[component]` functions, the macro
+///   generates a wrapper that holds the collected data.
 ///
 /// Components without `ChildCollector` produce a compile error when used
 /// with children in `element!`.
@@ -144,21 +159,16 @@ impl<C: Component> AddTo<Elements> for ComponentWithSlot<C> {
 /// ```ignore
 /// // Component defines what children it accepts
 /// enum TextChild {
-///     Line(Line),
+///     Span(Span),
 /// }
 ///
-/// impl From<Line> for TextChild {
-///     fn from(l: Line) -> Self { TextChild::Line(l) }
+/// impl From<Span> for TextChild {
+///     fn from(s: Span) -> Self { TextChild::Span(s) }
 /// }
 ///
-/// impl ChildCollector for TextBlock {
-///     type Collector = DataChildren<TextChild>;
-///     type Output = TextBlock;
-///     fn finish(mut self, collector: DataChildren<TextChild>) -> TextBlock {
-///         // process children...
-///         self
-///     }
-/// }
+/// // #[component] generates the ChildCollector automatically:
+/// // #[component(props = MyText, children = DataChildren<TextChild>)]
+/// // fn my_text(props: &MyText, children: &DataChildren<TextChild>) -> Elements { ... }
 /// ```
 pub struct DataChildren<T>(Vec<T>);
 

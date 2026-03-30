@@ -214,7 +214,7 @@ pub trait Component: Send + Sync + 'static {
     type State: Send + Sync + Default + 'static;
 
     /// Primitive: render into a buffer region. Only for hand-written
-    /// leaf components (e.g., [`Canvas`](crate::Canvas), [`TextBlock`](crate::TextBlock)).
+    /// leaf components (e.g., [`Canvas`](crate::Canvas)).
     /// `#[component]` functions return element trees instead.
     #[doc(hidden)]
     fn render(&self, _area: Rect, _buf: &mut Buffer, _state: &Self::State) {}
@@ -340,8 +340,8 @@ pub trait Component: Send + Sync + 'static {
 /// ```ignore
 /// element! {
 ///     VStack {
-///         TextBlock("Hello")
-///         TextBlock("World")
+///         "Hello"
+///         "World"
 ///     }
 /// }
 /// ```
@@ -371,8 +371,8 @@ fn vstack(_props: &VStack, children: Elements) -> Elements {
 /// ```ignore
 /// element! {
 ///     HStack {
-///         Column(width: Fixed(10)) { TextBlock("left") }
-///         Column(width: Fill) { TextBlock("right") }
+///         Column(width: Fixed(10)) { "left" }
+///         Column(width: Fill) { "right" }
 ///     }
 /// }
 /// ```
@@ -400,8 +400,8 @@ fn hstack(_props: &HStack, hooks: &mut Hooks<()>, children: Elements) -> Element
 /// ```ignore
 /// element! {
 ///     HStack {
-///         Column(width: Fixed(10)) { TextBlock("fixed") }
-///         Column(width: Fill) { TextBlock("flexible") }
+///         Column(width: Fixed(10)) { "fixed" }
+///         Column(width: Fill) { "flexible" }
 ///     }
 /// }
 /// ```

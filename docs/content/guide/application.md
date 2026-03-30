@@ -152,7 +152,7 @@ Here's the full `app` example demonstrating the Application lifecycle:
 use std::io;
 use std::time::Duration;
 
-use eye_declare::{element, Application, Elements, Line, Span, Spinner, TextBlock};
+use eye_declare::{element, Application, Elements, Spinner, Text};
 use ratatui_core::style::{Color, Modifier, Style};
 
 struct AppState {
@@ -163,11 +163,7 @@ struct AppState {
 fn app_view(state: &AppState) -> Elements {
     element! {
         #(for (text, style) in &state.messages {
-            TextBlock {
-                Line {
-                    Span(text: text.clone(), style: *style)
-                }
-            }
+            Text(style: *style) { Span(text: text.clone()) }
         })
         #(if state.thinking {
             Spinner(label: "Processing...")

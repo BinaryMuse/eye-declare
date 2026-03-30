@@ -2,7 +2,7 @@ use std::io::Write;
 use std::time::Duration;
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use eye_declare::{Component, EventResult, InlineRenderer, TextBlock, Tracked, VStack};
+use eye_declare::{Component, EventResult, InlineRenderer, Text, Tracked, VStack};
 use ratatui_core::{
     buffer::Buffer,
     layout::Rect,
@@ -186,28 +186,27 @@ fn main() -> std::io::Result<()> {
     let mut renderer = InlineRenderer::new(width);
 
     // Header
-    let header = renderer.push(
-        TextBlock::new()
-            .line(
-                "eye_declare InlineRenderer Demo",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            )
-            .line(
-                "Tab switches between inputs. Enter submits. Ctrl+C exits.",
-                Style::default().fg(Color::DarkGray),
-            )
-            .unstyled(""),
-    );
+    let header1 = renderer.push(Text::styled(
+        "eye_declare InlineRenderer Demo",
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    ));
+    let header2 = renderer.push(Text::styled(
+        "Tab switches between inputs. Enter submits. Ctrl+C exits.",
+        Style::default().fg(Color::DarkGray),
+    ));
+    let header3 = renderer.push(Text::unstyled(""));
     flush(&mut renderer)?;
-    renderer.freeze(header);
+    renderer.freeze(header1);
+    renderer.freeze(header2);
+    renderer.freeze(header3);
 
     // Message area
     let messages = renderer.push(VStack);
 
     // Spacer
-    let _spacer = renderer.push(TextBlock::new().unstyled(""));
+    let _spacer = renderer.push(Text::unstyled(""));
 
     // Two input fields — Tab cycles between them
     let name_id = renderer.push(Input);
@@ -300,7 +299,7 @@ fn event_loop(
                 };
                 renderer.append_child(
                     messages,
-                    TextBlock::new().line(
+                    Text::styled(
                         format!("{}: {}", display_name, text),
                         Style::default().fg(Color::White),
                     ),

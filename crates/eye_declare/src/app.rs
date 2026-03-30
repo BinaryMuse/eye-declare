@@ -868,13 +868,12 @@ impl<S: Send + 'static> Application<S> {
 mod tests {
     use super::*;
     use crate::components::spinner::Spinner;
-    use crate::components::text::TextBlock;
-    use ratatui_core::style::Style;
+    use crate::components::text::Text;
 
     fn text_view(state: &Vec<String>) -> Elements {
         let mut els = Elements::new();
         for line in state {
-            els.add(TextBlock::new().line(line.as_str(), Style::default()));
+            els.add(Text::unstyled(line.as_str()));
         }
         els
     }
@@ -945,7 +944,7 @@ mod tests {
             .state(0u32)
             .view(|n: &u32| {
                 let mut els = Elements::new();
-                els.add(TextBlock::new().line(format!("count: {}", n), Style::default()));
+                els.add(Text::unstyled(format!("count: {}", n)));
                 els
             })
             .width(20)
@@ -1053,7 +1052,7 @@ mod tests {
             .state(0u32)
             .view(|n: &u32| {
                 let mut els = Elements::new();
-                els.add(TextBlock::new().line(format!("count: {}", n), Style::default()));
+                els.add(Text::unstyled(format!("count: {}", n)));
                 els
             })
             .width(20)
@@ -1141,7 +1140,7 @@ mod tests {
             .state(0u32)
             .view(|n: &u32| {
                 let mut els = Elements::new();
-                els.add(TextBlock::new().line(format!("count: {}", n), Style::default()));
+                els.add(Text::unstyled(format!("count: {}", n)));
                 els
             })
             .width(20)
@@ -1179,7 +1178,7 @@ mod tests {
             .view(|lines: &Vec<String>| {
                 let mut els = Elements::new();
                 for (i, line) in lines.iter().enumerate() {
-                    els.add(TextBlock::new().unstyled(line.as_str()))
+                    els.add(Text::unstyled(line.as_str()))
                         .key(format!("line-{}", i));
                 }
                 els
@@ -1220,7 +1219,7 @@ mod tests {
             .view(|lines: &Vec<String>| {
                 let mut els = Elements::new();
                 for line in lines {
-                    els.add(TextBlock::new().unstyled(line.as_str()));
+                    els.add(Text::unstyled(line.as_str()));
                 }
                 els
             })
@@ -1249,7 +1248,7 @@ mod tests {
             .view(|lines: &Vec<String>| {
                 let mut els = Elements::new();
                 for line in lines {
-                    els.add(TextBlock::new().unstyled(line.as_str()));
+                    els.add(Text::unstyled(line.as_str()));
                 }
                 els
             })
@@ -1282,7 +1281,7 @@ mod tests {
             .view(|lines: &Vec<String>| {
                 let mut els = Elements::new();
                 for line in lines {
-                    els.add(TextBlock::new().unstyled(line.as_str()));
+                    els.add(Text::unstyled(line.as_str()));
                 }
                 els
             })
@@ -1326,9 +1325,9 @@ mod tests {
             buf: &mut ratatui_core::buffer::Buffer,
             state: &Self::State,
         ) {
+            use ratatui_core::widgets::Widget;
             if let Some(ref v) = state.value {
-                let text = TextBlock::new().unstyled(v.as_str());
-                text.render(area, buf, &());
+                ratatui_widgets::paragraph::Paragraph::new(v.as_str()).render(area, buf);
             }
         }
 

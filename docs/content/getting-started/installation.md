@@ -69,7 +69,7 @@ tokio = { version = "1", features = ["full"] }
 Create a minimal example to confirm everything works:
 
 ```rust
-use eye_declare::{element, Application, Elements, TextBlock};
+use eye_declare::{element, Application, Elements};
 
 struct State;
 

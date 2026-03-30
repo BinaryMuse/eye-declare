@@ -2,7 +2,7 @@ use std::io::{self, Write};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use eye_declare::{InlineRenderer, Markdown, Spinner, TextBlock, VStack};
+use eye_declare::{InlineRenderer, Markdown, Spinner, Text, VStack};
 use ratatui_core::style::{Color, Modifier, Style};
 
 fn main() -> io::Result<()> {
@@ -11,18 +11,16 @@ fn main() -> io::Result<()> {
     let mut stdout = io::stdout();
 
     // User prompt
-    let _prompt = r.push(
-        TextBlock::new().line(
-            "› Explain how async/await works in Rust with an example",
-            Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
-        ),
-    );
+    let _prompt = r.push(Text::styled(
+        "› Explain how async/await works in Rust with an example",
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD),
+    ));
     flush(&mut r, &mut stdout)?;
 
     // Spacer
-    let _sp = r.push(TextBlock::new().unstyled(""));
+    let _sp = r.push(Text::unstyled(""));
 
     // Response container
     let response = r.push(VStack);

@@ -10,7 +10,7 @@ use std::io::{self, Write};
 use std::thread;
 use std::time::Duration;
 
-use eye_declare::{Component, Elements, Hooks, InlineRenderer, Spinner, TextBlock, VStack};
+use eye_declare::{Component, Elements, Hooks, InlineRenderer, Spinner, Text, VStack};
 use ratatui_core::{
     buffer::Buffer,
     layout::Rect,
@@ -108,14 +108,12 @@ struct AppState {
 fn task_view(state: &AppState) -> Elements {
     let mut els = Elements::new();
 
-    els.add(
-        TextBlock::new().line(
-            format!("Tasks ({})", state.tasks.len()),
-            Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
-        ),
-    );
+    els.add(Text::styled(
+        format!("Tasks ({})", state.tasks.len()),
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD),
+    ));
 
     for task in &state.tasks {
         els.add(StatusLog::new(task)).key(task.clone());
@@ -125,7 +123,7 @@ fn task_view(state: &AppState) -> Elements {
         els.add(Spinner::new("Processing...")).key("spinner");
     }
 
-    els.add(TextBlock::new().line("---", Style::default().fg(Color::DarkGray)));
+    els.add(Text::styled("---", Style::default().fg(Color::DarkGray)));
 
     els
 }

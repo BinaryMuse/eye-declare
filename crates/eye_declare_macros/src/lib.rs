@@ -26,7 +26,7 @@ use proc_macro::TokenStream;
 /// | `Component(prop: val)` | Construct with props (struct field init) |
 /// | `Component { ... }` | Component with children (slot or data) |
 /// | `Component(props) { children }` | Props and children |
-/// | `"text"` | String literal — auto-wrapped as `TextBlock` |
+/// | `"text"` | String literal — auto-wrapped as `Text` |
 /// | `#(if cond { ... })` | Conditional children |
 /// | `#(if let pat = expr { ... })` | Pattern-matching conditional |
 /// | `#(for pat in iter { ... })` | Loop children |

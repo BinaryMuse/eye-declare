@@ -1,13 +1,13 @@
 ---
 title: Built-in Components
-description: Reference for TextBlock, Spinner, Markdown, VStack, HStack, and Column
+description: Reference for Text, Spinner, Markdown, VStack, HStack, and Column
 ---
 
 # Built-in Components
 
 eye-declare ships with a small set of built-in components that cover common TUI patterns.
 
-## TextBlock
+## Text
 
 Styled text with display-time word wrapping. The most common component for displaying text.
 
@@ -18,47 +18,53 @@ Styled text with display-time word wrapping. The most common component for displ
 element! { "Hello, world!" }
 
 // Styled text (imperative)
-TextBlock::new()
-    .line("Bold header", Style::default().add_modifier(Modifier::BOLD))
-    .line("Normal text", Style::default())
-    .unstyled("")  // empty line
+Text::unstyled("Hello, world!")
+Text::styled("Bold header", Style::default().add_modifier(Modifier::BOLD))
 ```
 
-### With Line and Span children
+### With Span children
 
-For multi-styled lines, use `Line` and `Span` children in the macro:
+For multi-styled text, use `Span` children in the macro:
 
 ```rust
 element! {
-    TextBlock {
-        Line {
-            Span(
-                text: "Status: ".into(),
-                style: Style::default().fg(Color::DarkGray)
-            )
-            Span(
-                text: "Online".into(),
-                style: Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
-            )
-        }
-        Line {
-            Span(text: "Last updated: 2 minutes ago".into())
-        }
+    Text {
+        Span(
+            text: "Status: ".into(),
+            style: Style::default().fg(Color::DarkGray)
+        )
+        Span(
+            text: "Online".into(),
+            style: Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+        )
     }
 }
 ```
 
-`Line` and `Span` are data children — they're collected at build time and stored on the `TextBlock`, not as child components in the tree.
+`Span` children are data children — they're collected at build time and stored on the `Text`, not as child components in the tree.
+
+### With a base style
+
+Apply a base style to the entire Text, then add Span children for inline overrides:
+
+```rust
+element! {
+    Text(style: Style::default().fg(Color::DarkGray)) {
+        "Last updated: 2 minutes ago"
+    }
+}
+```
 
 ### Word wrapping
 
-TextBlock automatically wraps text at word boundaries when content exceeds the available width. The wrapping is computed at render time using the actual allocated width, so it responds correctly to terminal resizes.
+Text automatically wraps text at word boundaries when content exceeds the available width. The wrapping is computed at render time using the actual allocated width, so it responds correctly to terminal resizes.
 
 ### Properties
 
 | Property | Type | Description |
 |----------|------|-------------|
-| (lines) | Built via `.line()` or `Line`/`Span` children | The text content |
+| `style` | `Style` | Base style applied to all content |
+| (content) | Built via `Span` children or string literals | The text content |
 
 ## Spinner
 

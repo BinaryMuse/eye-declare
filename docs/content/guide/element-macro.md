@@ -14,11 +14,7 @@ use eye_declare::{element, Elements};
 
 fn my_view(state: &MyState) -> Elements {
     element! {
-        TextBlock {
-            Line {
-                Span(text: "Hello, world!".into())
-            }
-        }
+        Text { "Hello, world!" }
     }
 }
 ```
@@ -74,11 +70,11 @@ element! {
 
 ## String literals
 
-Bare string literals are automatically wrapped in `TextBlock`:
+Bare string literals are automatically wrapped in `Text`:
 
 ```rust
 element! {
-    "This becomes a TextBlock"
+    "This becomes a Text"
     "So does this"
 }
 ```
@@ -132,10 +128,8 @@ Use `#(for ...)` for iterating over collections:
 ```rust
 element! {
     #(for (i, msg) in state.messages.iter().enumerate() {
-        TextBlock(key: format!("msg-{i}")) {
-            Line {
-                Span(text: msg.clone())
-            }
+        Text(key: format!("msg-{i}")) {
+            Span(text: msg.clone())
         }
     })
 }
@@ -151,10 +145,8 @@ Use `#(expr)` to splice a pre-built `Elements` value inline:
 fn footer(state: &AppState) -> Elements {
     element! {
         "---"
-        TextBlock {
-            Line {
-                Span(text: format!("{} items", state.items.len()))
-            }
+        Text {
+            Span(text: format!("{} items", state.items.len()))
         }
     }
 }
@@ -179,7 +171,7 @@ This is useful for composing view functions — you can break your UI into small
 | `Component(prop: value)` | Component with props (struct field init) |
 | `Component { ... }` | Component with children |
 | `Component(props) { children }` | Both props and children |
-| `"text"` | String literal — auto-wrapped as `TextBlock` |
+| `"text"` | String literal — auto-wrapped as `Text` |
 | `key: expr` | Special prop for stable identity across rebuilds |
 | `#(if cond { ... })` | Conditional children |
 | `#(if let pat = expr { ... })` | Pattern-matching conditional |

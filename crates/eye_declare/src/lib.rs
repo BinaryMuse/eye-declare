@@ -8,14 +8,14 @@
 //! # Quick start
 //!
 //! ```ignore
-//! use eye_declare::{element, Application, Elements, Spinner, TextBlock};
+//! use eye_declare::{element, Application, Elements, Spinner};
 //!
 //! struct State { messages: Vec<String>, loading: bool }
 //!
 //! fn view(state: &State) -> Elements {
 //!     element! {
 //!         #(for (i, msg) in state.messages.iter().enumerate() {
-//!             TextBlock(key: format!("msg-{i}"), lines: vec![msg.clone().into()])
+//!             Text(key: format!("msg-{i}")) { #(msg.clone()) }
 //!         })
 //!         #(if state.loading {
 //!             Spinner(key: "loading", label: "Thinking...")
@@ -64,7 +64,7 @@
 //!
 //! | Component | Description |
 //! |-----------|-------------|
-//! | [`TextBlock`] | Styled text with display-time word wrapping |
+//! | [`Text`] | Styled text with word wrapping (data children: [`Span`]) |
 //! | [`Spinner`] | Animated spinner with auto-tick via lifecycle hooks |
 //! | [`Markdown`] | Headings, bold, italic, inline code, code blocks, lists |
 //! | [`View`] | Unified layout container with optional borders, padding, and background |
@@ -139,14 +139,14 @@ pub mod app;
 /// Most users won't interact with this module directly — it powers the
 /// `element!` macro's ability to type-check parent-child relationships
 /// at compile time. See [`ChildCollector`] if you're building a component
-/// that accepts data children (like [`TextBlock`] accepts [`Line`]s).
+/// that accepts data children (like [`Text`](crate::Text) accepts [`Span`](crate::Span)s).
 pub mod children;
 
 /// The [`Component`] trait (framework-internal) and built-in containers
 /// ([`VStack`], [`HStack`], [`Column`]).
 pub mod component;
 
-/// Built-in components: [`TextBlock`](components::text::TextBlock),
+/// Built-in components: [`Text`](components::text::Text),
 /// [`Spinner`](components::spinner::Spinner),
 /// [`Markdown`](components::markdown::Markdown), and
 /// [`View`](components::view::View).
@@ -191,7 +191,7 @@ pub use component::{Column, Component, EventResult, HStack, Tracked, VStack};
 pub use components::canvas::Canvas;
 pub use components::markdown::{Markdown, MarkdownState};
 pub use components::spinner::{Spinner, SpinnerState};
-pub use components::text::{Line, Span, TextBlock};
+pub use components::text::{Span, Text, TextChild};
 pub use components::view::{Direction, View};
 pub use element::{ElementHandle, Elements};
 
@@ -225,7 +225,7 @@ pub use ratatui_widgets::borders::BorderType;
 ///     // Key for stable identity across rebuilds
 ///     Markdown(key: "intro", source: "# Hello".into())
 ///
-///     // String literal shorthand (becomes a TextBlock)
+///     // String literal shorthand (becomes a Text)
 ///     "Some plain text"
 ///
 ///     // Conditional children

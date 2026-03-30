@@ -56,7 +56,7 @@ pub(crate) struct ElementEntry {
 /// // Imperative API:
 /// fn my_view(state: &MyState) -> Elements {
 ///     let mut els = Elements::new();
-///     els.add(TextBlock::new().unstyled("Hello"));
+///     els.add(Text::unstyled("Hello"));
 ///     if state.loading {
 ///         els.add(Spinner::new("Loading...")).key("spinner");
 ///     }
