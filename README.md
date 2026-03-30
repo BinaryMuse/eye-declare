@@ -10,12 +10,7 @@ eye-declare provides a React-like component model for building terminal UIs that
 
 ## Status
 
-eye-declare is in early development; expect breaking changes.
-
-Coming changes:
-
-- [ ] More ergonomic "leaf" API
-- [ ] Improvements to height measurement and vertical layout
+eye-declare is in early development; expect breaking changes across v0.x versions until v1.0.
 
 ## Installation
 
