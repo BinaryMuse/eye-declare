@@ -51,9 +51,11 @@ pub fn props_impl(input: TokenStream) -> syn::Result<TokenStream> {
         }
     }
 
-    // Add #[derive(typed_builder::TypedBuilder)] to the struct
+    // Add #[derive(::eye_declare::TypedBuilder)] to the struct,
+    // using the re-export so downstream crates don't need typed_builder
+    // as a direct dependency.
     item.attrs.push(syn::parse_quote! {
-        #[derive(typed_builder::TypedBuilder)]
+        #[derive(::eye_declare::TypedBuilder)]
     });
 
     Ok(quote! { #item })
