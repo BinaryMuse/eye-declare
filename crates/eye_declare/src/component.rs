@@ -175,99 +175,61 @@ impl<S> DerefMut for Tracked<S> {
 
 /// A component that can render itself into a terminal region.
 ///
-/// This is the core trait of eye_declare. Components separate **props**
-/// (data on `&self`, set by the parent, immutable) from **state** (the
-/// associated `State` type, framework-managed via [`Tracked`]).
-///
-/// # Minimal implementation
-///
-/// Most components override [`view()`](Component::view) to compose their
-/// output from other components. The default passes children through
-/// unchanged.
+/// Most users should define components with the [`#[component]`](macro@crate::component)
+/// and [`#[props]`](macro@crate::props) attribute macros rather than implementing
+/// this trait directly:
 ///
 /// ```ignore
-/// use eye_declare::{Component, Elements, View, Canvas};
-/// use ratatui_widgets::borders::BorderType;
+/// #[props]
+/// struct CardProps {
+///     title: String,
+///     #[default(true)]
+///     visible: bool,
+/// }
 ///
-/// #[derive(Default)]
-/// struct Card { pub title: String }
-///
-/// impl Component for Card {
-///     type State = ();
-///
-///     fn view(&self, _state: &(), children: Elements) -> Elements {
-///         let mut els = Elements::new();
-///         els.add_with_children(
-///             View { border: Some(BorderType::Rounded),
-///                    title: Some(self.title.clone()),
-///                    ..View::default() },
-///             children,
-///         );
-///         els
+/// #[component(props = CardProps, children = Elements)]
+/// fn card(props: &CardProps, children: Elements) -> Elements {
+///     element! {
+///         View(border: BorderType::Rounded, title: props.title.clone()) {
+///             #(children)
+///         }
 ///     }
 /// }
 /// ```
 ///
-/// # Children and composition
+/// The `#[component]` macro generates an `impl Component` with an
+/// [`update()`](Component::update) override that calls the function
+/// once per cycle with real hooks and real children.
 ///
-/// The [`view()`](Component::view) method receives slot children and
-/// returns the component's element tree. Three patterns:
+/// # Direct implementation
 ///
-/// - **Pass through** (default) — return `children` unchanged. Layout
-///   containers like [`VStack`] use this.
-/// - **Generate own tree** — ignore `children`, return custom [`Elements`]
-///   using [`Canvas`](crate::Canvas) for raw rendering.
-/// - **Wrap children** — incorporate `children` into a larger tree with
-///   borders, padding, etc. via [`View`](crate::View).
-///
-/// # Lifecycle
-///
-/// Override [`lifecycle`](Component::lifecycle) to declare effects via [`Hooks`]:
-/// intervals, mount/unmount handlers, and autofocus requests.
+/// Implement this trait directly only for framework primitives that need
+/// raw buffer access ([`Canvas`](crate::Canvas)) or layout chrome
+/// ([`View`](crate::View)). Most methods are `#[doc(hidden)]` — they
+/// exist for the framework and primitives, not for typical component
+/// authors.
 pub trait Component: Send + Sync + 'static {
     /// State type for this component. The framework wraps it in
     /// `Tracked<S>` for automatic dirty detection.
     type State: Send + Sync + Default + 'static;
 
-    /// Render into the given buffer region using current state.
-    /// Can use any ratatui Widget internally.
-    ///
-    /// By default, the framework measures height from the render output
-    /// (probe render). Override [`desired_height`](Component::desired_height)
-    /// for components that fill their given area rather than rendering
-    /// a fixed amount of content.
-    ///
-    /// Components that implement [`view()`](Component::view) typically
-    /// leave this as the default no-op, since rendering is handled by
-    /// the element tree returned from `view()`.
+    /// Primitive: render into a buffer region. Only for hand-written
+    /// leaf components (e.g., [`Canvas`](crate::Canvas), [`TextBlock`](crate::TextBlock)).
+    /// `#[component]` functions return element trees instead.
+    #[doc(hidden)]
     fn render(&self, _area: Rect, _buf: &mut Buffer, _state: &Self::State) {}
 
-    /// Optional height hint. Return `Some(n)` to declare a fixed height
-    /// instead of letting the framework probe-render to measure.
-    ///
-    /// Override this for components that expand to fill their given area
-    /// (e.g., a bordered input box). Most components should leave the
-    /// default (`None`) and let the framework measure automatically.
+    /// Primitive: optional height hint to skip probe-render measurement.
+    /// Only for hand-written leaf components.
+    #[doc(hidden)]
     fn desired_height(&self, _width: u16, _state: &Self::State) -> Option<u16> {
         None
     }
 
-    /// Handle an input event during the **capture** phase (root → focused).
-    ///
-    /// The capture phase fires before the bubble phase, walking from the
-    /// root of the tree down to the focused component. Return
-    /// [`EventResult::Consumed`] to stop propagation — the event will
-    /// never reach the focused component's [`handle_event`](Component::handle_event)
-    /// or any bubble-phase handler.
-    ///
-    /// Use this for global shortcuts that should take priority over
-    /// focused-component handling.
-    ///
-    /// The state is wrapped in [`Tracked`] — only mutable access via
-    /// [`DerefMut`] marks the component dirty. Use [`Tracked::read()`]
-    /// for reads that should not trigger a re-render.
-    ///
-    /// Default: [`EventResult::Ignored`] (pass through to the next node).
+    /// Capture-phase event handler (root → focused). Prefer
+    /// [`Hooks::use_event_capture`](crate::Hooks::use_event_capture) in
+    /// `#[component]` functions.
+    #[doc(hidden)]
     fn handle_event_capture(
         &self,
         _event: &crossterm::event::Event,
@@ -276,14 +238,10 @@ pub trait Component: Send + Sync + 'static {
         EventResult::Ignored
     }
 
-    /// Handle an input event during the **bubble** phase (focused → root).
-    ///
-    /// Return [`EventResult::Consumed`] if the event was handled,
-    /// or [`EventResult::Ignored`] to let it bubble up to the parent.
-    ///
-    /// The state is wrapped in [`Tracked`] — only mutable access via
-    /// [`DerefMut`] marks the component dirty. Use [`Tracked::read()`]
-    /// for reads that should not trigger a re-render.
+    /// Bubble-phase event handler (focused → root). Prefer
+    /// [`Hooks::use_event`](crate::Hooks::use_event) in `#[component]`
+    /// functions.
+    #[doc(hidden)]
     fn handle_event(
         &self,
         _event: &crossterm::event::Event,
@@ -292,112 +250,62 @@ pub trait Component: Send + Sync + 'static {
         EventResult::Ignored
     }
 
-    /// Whether this component can receive focus.
-    ///
-    /// The framework uses this for Tab cycling — only focusable
-    /// components are included in the tab order (depth-first tree order).
+    /// Whether this component can receive focus. Prefer
+    /// [`Hooks::use_focusable`](crate::Hooks::use_focusable) in
+    /// `#[component]` functions.
+    #[doc(hidden)]
     fn is_focusable(&self, _state: &Self::State) -> bool {
         false
     }
 
-    /// Where to position the terminal's hardware cursor when this
-    /// component has focus. Returns `(col, row)` relative to the
-    /// component's render area, or `None` to hide the cursor.
-    ///
-    /// This is used by the framework to position the blinking
-    /// terminal cursor after rendering (e.g., at the text insertion
-    /// point in an input field).
+    /// Cursor position when focused. Prefer
+    /// [`Hooks::use_cursor`](crate::Hooks::use_cursor) in `#[component]`
+    /// functions.
+    #[doc(hidden)]
     fn cursor_position(&self, _area: Rect, _state: &Self::State) -> Option<(u16, u16)> {
         None
     }
 
-    /// Create the initial state for this component.
-    ///
-    /// Returns `None` to use `State::default()`. Override to provide
-    /// custom initial state.
+    /// Provide initial state. Returns `None` to use `State::default()`.
+    /// In `#[component]`, use `initial_state = expr` on the attribute instead.
+    #[doc(hidden)]
     fn initial_state(&self) -> Option<Self::State> {
         None
     }
 
-    /// Insets for the content area within this component's render area.
-    ///
-    /// The framework lays out children inside the inset region. The
-    /// component renders its own chrome (borders, padding) via `render()`
-    /// in the full area, then children are rendered within the inner area.
-    ///
-    /// Default: [`Insets::ZERO`] (children get the full area).
+    /// Primitive: insets for child layout within the render area.
+    /// Only for hand-written chrome components (e.g., [`View`](crate::View)).
+    #[doc(hidden)]
     fn content_inset(&self, _state: &Self::State) -> Insets {
         Insets::ZERO
     }
 
-    /// Layout direction for this component's children.
-    ///
-    /// Override to `Layout::Horizontal` for horizontal containers.
-    /// Default: `Layout::Vertical`.
+    /// Layout direction for children. Prefer
+    /// [`Hooks::use_layout`](crate::Hooks::use_layout) in `#[component]`
+    /// functions.
+    #[doc(hidden)]
     fn layout(&self) -> Layout {
         Layout::default()
     }
 
-    /// Width constraint for this component within a horizontal container.
-    ///
-    /// Override to declare a fixed or custom width. The renderer reads
-    /// this at build time to allocate horizontal space.
-    ///
-    /// Default: [`WidthConstraint::Fill`] (take remaining space).
+    /// Width constraint within a horizontal parent. Prefer
+    /// [`Hooks::use_width_constraint`](crate::Hooks::use_width_constraint)
+    /// in `#[component]` functions.
+    #[doc(hidden)]
     fn width_constraint(&self) -> WidthConstraint {
         WidthConstraint::default()
     }
 
-    /// Declare lifecycle effects for this component.
-    ///
-    /// Called by the framework after build and update. Use the `hooks`
-    /// parameter to register intervals, mount/unmount handlers, etc.
-    /// The framework clears old effects and applies the new set on
-    /// every call.
-    ///
-    /// Default: no-op (no effects).
+    /// Fallback: declare lifecycle effects. Called by the default
+    /// [`update()`](Component::update) implementation. `#[component]`
+    /// functions handle lifecycle and view in a single `update()` override.
+    #[doc(hidden)]
     fn lifecycle(&self, _hooks: &mut Hooks<Self::State>, _state: &Self::State) {}
 
-    /// Return the element tree for this component.
-    ///
-    /// This is the primary rendering method. The `children` parameter
-    /// contains slot children passed by the parent (from `element!`
-    /// braces or `add_with_children`).
-    ///
-    /// The default passes children through unchanged — layout containers
-    /// like [`VStack`] and [`HStack`] use this behavior. Override to
-    /// compose a custom element tree:
-    ///
-    /// - **Wrap children** with chrome (borders, padding) using [`View`](crate::View)
-    /// - **Generate own tree** using [`Canvas`](crate::Canvas) for raw rendering
-    /// - **Ignore children** for pure leaf components
-    ///
-    /// Components that override `view()` are expected to be transparent
-    /// containers — their `render()` and `content_inset()` should be left
-    /// as no-ops. The framework calls both on all containers; for primitive
-    /// components like `View` and `Canvas` these methods provide border/inset
-    /// rendering, but for view-based components they should do nothing.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// use eye_declare::{Component, Elements, View, Canvas, element};
-    /// use ratatui_widgets::borders::BorderType;
-    ///
-    /// struct Card { title: String }
-    ///
-    /// impl Component for Card {
-    ///     type State = ();
-    ///
-    ///     fn view(&self, _state: &(), children: Elements) -> Elements {
-    ///         element! {
-    ///             View(border: BorderType::Rounded, title: self.title.clone()) {
-    ///                 #(children)
-    ///             }
-    ///         }
-    ///     }
-    /// }
-    /// ```
+    /// Fallback: return the element tree. Called by the default
+    /// [`update()`](Component::update) implementation. `#[component]`
+    /// functions handle lifecycle and view in a single `update()` override.
+    #[doc(hidden)]
     fn view(&self, _state: &Self::State, children: Elements) -> Elements {
         children
     }

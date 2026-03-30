@@ -51,21 +51,13 @@ fn card(props: &CardProps, children: Elements) -> Elements {
 
 ## Friction Points
 
-### F1. Component trait carries legacy methods
+### F1. ~~Component trait carries legacy methods~~ (Resolved in Wave 3A/3C)
 
-Methods `render()`, `desired_height()`, `content_inset()`, `initial_state()` are only expressible via the old model. `#[component]` can't generate them.
+All legacy methods are now `#[doc(hidden)]`. The trait's public API is just `State` + `update()`. Users define components via `#[component]` and never see the trait methods.
 
-| Method | New model equivalent |
-|--------|---------------------|
-| `render()` | Return `Canvas` element from `view()` |
-| `desired_height()` | `hooks.use_height_hint(n)` (not yet built) |
-| `content_inset()` | Use `View` wrapper in return tree |
-| `initial_state()` | `initial_state = <expr>` attribute on `#[component]` (Wave 1C) |
+### F2. ~~Hooks can't override everything~~ (Resolved by design)
 
-### F2. Hooks can't override everything
-
-Hooks exist for: `use_focusable`, `use_cursor`, `use_event`, `use_event_capture`
-Hooks missing for: `content_inset()` (only needed by View, kept as primitive)
+All behavioral methods have hook equivalents. The remaining `render()` and `content_inset()` are primitive-only — kept on View and Canvas by design, not exposed to `#[component]` users.
 
 ### F3. ~~Function body runs twice per cycle~~ (Resolved in Wave 3B)
 
@@ -118,9 +110,9 @@ Old: struct + `impl_slot_children!` macro. New: `#[component(children = Elements
 
 | # | Task | Effort | Status |
 |---|------|--------|--------|
-| 3A | Unify `render()` and `view()` into a single path | High | Pending |
+| 3A | Unify `render()` and `view()` into a single path | High | Done |
 | 3B | Call function once, not twice — `update()` combines lifecycle + view | High | Done |
-| 3C | Remove or deprecate legacy trait methods (`render`, `desired_height`, `content_inset`) | Medium | Pending |
+| 3C | Hide legacy trait methods behind `#[doc(hidden)]` | Medium | Done |
 | 3D | Simplify `ChildCollector` / `DataChildren` / `ComponentWithSlot` hierarchy | High | Pending |
 | 3E | Remove struct+impl path entirely; `#[component]` becomes the only way | High | Pending |
 
