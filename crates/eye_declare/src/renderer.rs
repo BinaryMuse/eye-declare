@@ -436,6 +436,9 @@ impl Renderer {
     /// ```
     pub fn rebuild(&mut self, parent: NodeId, elements: Elements) {
         self.reconcile_children(parent, elements.into_items());
+        // Full rebuild reconciles all dirty nodes — no need for the
+        // pre-render refresh pass to repeat that work.
+        self.needs_refresh = false;
     }
 
     /// Find a direct child of `parent` by its key.
