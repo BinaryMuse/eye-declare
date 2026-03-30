@@ -802,11 +802,23 @@ impl Renderer {
     /// Called before measure/render so that `#[component]` functions that
     /// produce children based on state (e.g., Spinner returning Canvas)
     /// get fresh children after state changes from effects.
+    ///
+    /// **Limitation:** ancestor context values are not available during
+    /// this pass. Components that combine `use_interval` (or other
+    /// state-mutating effects) with `use_context` will see `None` for
+    /// context reads here. A full `rebuild()` restores correct context.
     fn refresh_dirty_containers(&mut self) {
-        // Collect IDs of dirty non-slot containers to avoid borrowing
-        // issues during mutation.
+        // Collect in post-order (descendants before ancestors) so that
+        // if a parent's re-reconciliation tombstones a child, the child
+        // was already processed.
         let dirty: Vec<NodeId> = self.collect_dirty_containers(self.root);
         for id in dirty {
+            // Guard against stale NodeIds: a prior iteration may have
+            // tombstoned this node as a side effect of reconciling an
+            // ancestor.
+            if !self.nodes.is_live(id) {
+                continue;
+            }
             let (provided, resolved) = self.update_node(id, None);
             let saved = self.push_context(provided);
             if let Some(els) = resolved {
@@ -818,6 +830,9 @@ impl Renderer {
 
     /// Collect container nodes that are dirty and safe to re-reconcile.
     ///
+    /// Returns nodes in **post-order** (descendants before ancestors) so
+    /// callers can safely process the list front-to-back without stale IDs.
+    ///
     /// A node is safe to re-reconcile when:
     /// - It was built through the element tree (has element_type_id)
     /// - It has children (is a container)
@@ -828,6 +843,7 @@ impl Renderer {
         let mut result = Vec::new();
         let children: Vec<NodeId> = self.nodes[id].children.clone();
         for child_id in children {
+            result.extend(self.collect_dirty_containers(child_id));
             let node = &self.nodes[child_id];
             if !node.frozen
                 && node.is_container()
@@ -837,7 +853,6 @@ impl Renderer {
             {
                 result.push(child_id);
             }
-            result.extend(self.collect_dirty_containers(child_id));
         }
         result
     }
