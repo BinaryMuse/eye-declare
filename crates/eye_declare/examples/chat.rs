@@ -177,7 +177,7 @@ fn chat_view(state: &AppState) -> Elements {
             #(message_element(msg))
         })
 
-        Text()
+        Text { "" }
 
         InputBox(key: "input", text: state.input.clone(), cursor: state.cursor, prompt: "You")
     }
