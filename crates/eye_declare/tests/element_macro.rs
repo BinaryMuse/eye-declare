@@ -1041,4 +1041,83 @@ mod component_tests {
             output_str
         );
     }
+
+    // --- Data children with state + initial_state ---
+
+    #[derive(Default)]
+    pub struct AccumState {
+        pub render_count: u32,
+    }
+
+    /// Child type for the stateful data-children component.
+    pub enum AccumChild {
+        Label(String),
+    }
+
+    impl From<String> for AccumChild {
+        fn from(s: String) -> Self {
+            AccumChild::Label(s)
+        }
+    }
+
+    #[props]
+    struct AccumProps {
+        #[default("header".to_string())]
+        header: String,
+    }
+
+    #[component(
+        props = AccumProps,
+        state = AccumState,
+        initial_state = AccumState { render_count: 1 },
+        children = eye_declare::DataChildren<AccumChild>
+    )]
+    fn accum(
+        props: &AccumProps,
+        state: &AccumState,
+        children: &eye_declare::DataChildren<AccumChild>,
+    ) -> Elements {
+        let labels: Vec<&str> = children
+            .as_slice()
+            .iter()
+            .map(|c| match c {
+                AccumChild::Label(s) => s.as_str(),
+            })
+            .collect();
+        let text = format!(
+            "{} (n={}) [{}]",
+            props.header,
+            state.render_count,
+            labels.join(", ")
+        );
+        let mut els = Elements::new();
+        els.add(Canvas::new(move |area: Rect, buf: &mut Buffer| {
+            Paragraph::new(text.as_str()).render(area, buf);
+        }));
+        els
+    }
+
+    #[test]
+    fn data_children_with_state_and_initial_state() {
+        // Verifies that initial_state works correctly for both the
+        // props-type Component impl and the wrapper Component impl.
+        let els = element! {
+            AccumProps(header: "test") {
+                // String children go through From<String> for AccumChild
+            }
+        };
+
+        let mut r = InlineRenderer::new(40);
+        let container = r.push(VStack);
+        r.rebuild(container, els);
+
+        let output = r.render();
+        let output_str = String::from_utf8_lossy(&output);
+        // initial_state sets render_count = 1; wrapper delegates to props
+        assert!(
+            output_str.contains("n=1"),
+            "wrapper initial_state should delegate to props: {}",
+            output_str
+        );
+    }
 }

@@ -1069,7 +1069,8 @@ impl Renderer {
             return node.last_height.unwrap_or(0);
         }
 
-        // Hook-declared height hint takes priority over everything.
+        // Hook-declared height hint takes priority over container/leaf measurement
+        // (frozen guard above is the only thing that precedes it).
         if let Some(h) = node.hook_height_hint {
             self.nodes[id].last_height = Some(h);
             return h;

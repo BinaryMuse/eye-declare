@@ -373,10 +373,14 @@ fn generate_data_children(
         }
 
         // Component impl on wrapper: for usage with data children.
+        // initial_state delegates to the inner props to avoid self-reference
+        // issues (self here is the wrapper, not the props struct).
         impl #crate_path::Component for #wrapper_name {
             type State = #state_type;
 
-            #initial_state_impl
+            fn initial_state(&self) -> Option<#state_type> {
+                self.__props.initial_state()
+            }
 
             fn update(
                 &self,
