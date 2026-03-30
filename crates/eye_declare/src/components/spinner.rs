@@ -60,16 +60,16 @@ pub struct Spinner {
     #[builder(default, setter(into))]
     pub label_first: bool,
     /// Style for the label text while spinning.
-    #[builder(default, setter(into))]
+    #[builder(default = Style::default().fg(Color::DarkGray), setter(into))]
     pub label_style: Style,
     /// Style for the label text in the done state.
-    #[builder(default, setter(into))]
+    #[builder(default = Style::default().fg(Color::Green), setter(into))]
     pub done_label_style: Style,
     /// Style for the animated spinner character.
-    #[builder(default, setter(into))]
+    #[builder(default = Style::default().fg(Color::DarkGray), setter(into))]
     pub spinner_style: Style,
     /// Style for the checkmark in the done state.
-    #[builder(default, setter(into))]
+    #[builder(default = Style::default().fg(Color::Green), setter(into))]
     pub checkmark_style: Style,
 }
 
