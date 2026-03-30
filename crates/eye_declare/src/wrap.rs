@@ -5,7 +5,6 @@ use ratatui_widgets::paragraph::{Paragraph, Wrap};
 ///
 /// Uses ratatui's `Paragraph` with `Wrap { trim: false }` to match
 /// the rendering behavior of [`wrapping_paragraph`].
-#[allow(dead_code)]
 pub fn wrapped_line_count(text: &Text<'_>, width: u16) -> u16 {
     if width == 0 {
         return 0;
