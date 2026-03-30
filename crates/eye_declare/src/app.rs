@@ -532,7 +532,9 @@ impl<S: Send + 'static> Application<S> {
 
     /// Advance active effects (animations, intervals).
     pub fn tick(&mut self) {
-        self.inline.tick();
+        if self.inline.tick() {
+            self.dirty = true;
+        }
     }
 
     /// Whether any effects are active (e.g., spinner animation).
