@@ -28,7 +28,7 @@ cargo add eye_declare
 ## Quick Start
 
 ```rust
-use eye_declare::{element, Application, ControlFlow, Elements, Spinner, TextBlock};
+use eye_declare::{element, Application, ControlFlow, Elements, Spinner};
 
 struct AppState {
     messages: Vec<String>,
@@ -38,11 +38,7 @@ struct AppState {
 fn chat_view(state: &AppState) -> Elements {
     element! {
         #(for (i, msg) in state.messages.iter().enumerate() {
-            TextBlock {
-                Line {
-                    Span(text: msg.clone())
-                }
-            }
+            #(msg.clone())
         })
         #(if state.thinking {
             Spinner(key: "thinking", label: "Thinking...")
@@ -101,7 +97,7 @@ fn dashboard(state: &DashboardState) -> Elements {
 | `Component(prop: value)` | Construct with props (struct field init) |
 | `Component { ... }` | Component with children |
 | `Component(props) { children }` | Both |
-| `"text"` | String literal — auto-wrapped as `TextBlock` |
+| `"text"` | String literal — auto-wrapped as `Text` |
 | `key: expr` | Special prop for stable identity across rebuilds |
 | `#(if cond { ... })` | Conditional children |
 | `#(if let pat = expr { ... })` | Pattern-matching conditional |
@@ -110,7 +106,51 @@ fn dashboard(state: &DashboardState) -> Elements {
 
 ## Components
 
-Components are the building blocks. Props live on `&self` (immutable, set by parent). Internal state lives in the associated `State` type (mutable, framework-managed via automatic dirty tracking).
+The primary way to define components is with `#[component]` and `#[props]`:
+
+```rust
+use eye_declare::{component, element, props, Elements, Canvas, View, BorderType};
+use ratatui_core::{buffer::Buffer, layout::Rect, style::{Color, Modifier, Style}, text::Line, widgets::Widget};
+use ratatui_widgets::paragraph::Paragraph;
+
+/// Props are defined with #[props] on a struct.
+#[props]
+struct Badge {
+    label: String,
+    #[default(Color::Green)]
+    color: Color,
+}
+
+/// The component function receives props (and optionally hooks/state)
+/// and returns Elements.
+#[component(props = Badge)]
+fn badge(props: &Badge) -> Elements {
+    let label = props.label.clone();
+    let color = props.color;
+
+    element!(
+        Canvas(render_fn: move |area: Rect, buf: &mut Buffer| {
+            let line = Line::styled(
+                format!(" {} ", label),
+                Style::default().fg(Color::Black).bg(color),
+            );
+            Paragraph::new(line).render(area, buf);
+        })
+    )
+}
+```
+
+Then use it in a view:
+
+```rust
+element! {
+    Badge(label: "Online", color: Color::Green)
+}
+```
+
+### Manual Component impl
+
+For full control, implement the `Component` trait directly. Props live on `&self` (immutable, set by parent). Internal state lives in the associated `State` type (mutable, framework-managed via automatic dirty tracking).
 
 ```rust
 use eye_declare::Component;
@@ -133,43 +173,28 @@ impl Component for StatusBadge {
 }
 ```
 
-Then use it in a view:
-
-```rust
-element! {
-    StatusBadge(label: "Online", color: Color::Green)
-}
-```
-
 ### Composite Components
 
-Components can generate child trees via the `children()` method. The `slot` parameter carries externally-provided children (like React's `props.children`):
+Components can accept children using `#[component(children = Elements)]`. Use `View` for layout and chrome:
 
 ```rust
-#[derive(Default)]
+#[props]
 struct Card {
-    pub title: String,
+    title: String,
 }
 
-impl Component for Card {
-    type State = ();
-
-    fn children(&self, _state: &(), slot: Option<Elements>) -> Option<Elements> {
-        let mut els = Elements::new();
-        els.add(TextBlock::new().line(&self.title, heading_style));
-        if let Some(children) = slot {
-            els.group(children); // slot children rendered here
+#[component(props = Card, children = Elements)]
+fn card(props: &Card, children: Elements) -> Elements {
+    element!(
+        View(
+            border: BorderType::Rounded,
+            border_style: Style::default().fg(Color::DarkGray),
+            title: props.title.clone(),
+            title_style: Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+        ) {
+            #(children)
         }
-        Some(els)
-    }
-
-    fn content_inset(&self, _state: &()) -> Insets {
-        Insets::all(1) // 1-cell border chrome
-    }
-
-    fn render(&self, area: Rect, buf: &mut Buffer, _state: &()) {
-        // draw border chrome; children render inside the inset area
-    }
+    )
 }
 ```
 
@@ -191,21 +216,35 @@ Three patterns:
 
 ### Lifecycle Hooks
 
-Components declare effects via `lifecycle()`. The framework manages registration and cleanup:
+Components declare effects via hooks. In a `#[component]` function, accept `hooks` and optionally `state`:
 
 ```rust
-impl Component for Timer {
-    type State = TimerState;
+#[derive(Default)]
+struct TimerState {
+    elapsed: u64,
+    started_at: Option<Instant>,
+}
 
-    fn lifecycle(&self, hooks: &mut Hooks<TimerState>, _state: &TimerState) {
-        if self.running {
-            hooks.use_interval(Duration::from_secs(1), |s| s.elapsed += 1);
-        }
-        hooks.use_mount(|s| s.started_at = Instant::now());
-        hooks.use_unmount(|s| println!("Timer ran for {:?}", s.started_at.elapsed()));
+#[props]
+struct Timer {
+    running: bool,
+}
+
+#[component(props = Timer, state = TimerState)]
+fn timer(props: &Timer, state: &TimerState, hooks: &mut Hooks<TimerState>) -> Elements {
+    if props.running {
+        hooks.use_interval(Duration::from_secs(1), |s| s.elapsed += 1);
     }
+    hooks.use_mount(|s| s.started_at = Some(Instant::now()));
+    hooks.use_unmount(|s| {
+        if let Some(at) = s.started_at {
+            println!("Timer ran for {:?}", at.elapsed());
+        }
+    });
 
-    // ...
+    element! {
+        #(format!("Elapsed: {}s", state.elapsed))
+    }
 }
 ```
 
@@ -217,6 +256,13 @@ Available hooks:
 | `use_mount(handler)` | Once, after the component is first built |
 | `use_unmount(handler)` | Once, when the component is removed |
 | `use_autofocus()` | Requests focus when the component mounts |
+| `use_focusable(bool)` | Declares the component as focusable for Tab cycling |
+| `use_cursor(handler)` | Returns cursor position when focused |
+| `use_event(handler)` | Handles events in the bubble phase (focused -> root) |
+| `use_event_capture(handler)` | Handles events in the capture phase (root -> focused) |
+| `use_layout(layout)` | Overrides the component's layout direction |
+| `use_width_constraint(constraint)` | Sets width constraint in horizontal layout |
+| `use_height_hint(height)` | Declares a fixed height, skipping probe measurement |
 | `provide_context(value)` | Makes a value available to all descendants |
 | `use_context::<T>(handler)` | Reads a value provided by an ancestor |
 
@@ -258,30 +304,18 @@ The `use_context` handler always fires with `Option<&T>` — `None` if no ancest
 Vertical stacking is the default. `HStack` provides horizontal layout with width constraints:
 
 ```rust
-use eye_declare::{Elements, HStack, Column, TextBlock};
+use eye_declare::{Elements, HStack, Column, Text};
 use eye_declare::WidthConstraint::Fixed;
 
 fn two_column_view(state: &MyState) -> Elements {
     element! {
         HStack {
             Column(width: Fixed(20)) {
-                TextBlock {
-                    #(for line in state.lines {
-                        Line {
-                            Span(text: line)
-                        }
-                    })
-                }
+                Text { "Sidebar content" }
             }
             Column {
                 // Fill: takes remaining space
-                TextBlock {
-                    #(for line in state.content_lines {
-                        Line {
-                            Span(text: line)
-                        }
-                    })
-                }
+                Text { "Main content" }
             }
         }
     }
@@ -378,7 +412,7 @@ This is an opt-in performance optimization. Without it, the framework handles al
 For direct control over the render loop, use `InlineRenderer`:
 
 ```rust
-use eye_declare::{InlineRenderer, Spinner, VStack, TextBlock};
+use eye_declare::{InlineRenderer, Spinner, VStack, Text};
 
 let mut renderer = InlineRenderer::new(width);
 let spinner_id = renderer.push(Spinner::new("Loading..."));
@@ -402,11 +436,14 @@ See the `terminal_demo` and `lifecycle` examples for complete sync event loop pa
 
 | Component | Description |
 |-----------|-------------|
-| `TextBlock` | Styled text with display-time word wrapping. Supports `Line`/`Span` children for multi-styled lines. |
+| `Text` | Styled text with word wrapping. Accepts `Span` and string children. |
 | `Spinner` | Animated Braille spinner with auto-tick. Shows a checkmark when `.done()`. |
 | `Markdown` | Headings, bold, italic, inline code, code blocks, and lists. |
+| `Canvas` | Raw buffer rendering via a user-provided closure. Direct access to the ratatui `Buffer`. |
+| `View` | Unified layout container with optional borders, padding, background, and direction. |
 | `VStack` | Vertical container — children stack top-to-bottom. |
 | `HStack` | Horizontal container — children lay left-to-right with `WidthConstraint`-based layout. |
+| `Column` | Width-constrained wrapper for use inside `HStack`. |
 
 ## Examples
 
@@ -422,6 +459,7 @@ cargo run --example markdown_demo   # Markdown rendering showcase
 cargo run --example growing         # Dynamically growing content
 cargo run --example nested          # Nested component trees
 cargo run --example wrapping        # Word wrapping and resize behavior
+cargo run --example data_children   # Typed data children with #[component]
 ```
 
 ## Architecture

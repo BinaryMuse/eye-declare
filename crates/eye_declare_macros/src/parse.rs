@@ -10,7 +10,7 @@ pub enum Node {
         props: Vec<Prop>,
         children: Option<Vec<Node>>,
     },
-    /// A string literal, rendered as TextBlock.
+    /// A string literal, rendered as Text.
     Text(LitStr),
     /// `#(if cond { ... })` or `#(if cond { ... } else { ... })`
     Conditional {
