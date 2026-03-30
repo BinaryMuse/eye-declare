@@ -163,6 +163,7 @@ impl<C: Component> AnyComponent for C {
             capture_hook,
             layout,
             width_constraint,
+            height_hint,
         ) = decomposed;
 
         // Phase 2: run context consumers with mutable tracked state
@@ -182,6 +183,7 @@ impl<C: Component> AnyComponent for C {
                 capture_hook,
                 layout,
                 width_constraint,
+                height_hint,
             },
             elements,
         )
@@ -325,6 +327,7 @@ pub(crate) struct LifecycleOutput {
     pub capture_hook: Option<Box<dyn AnyEventHook>>,
     pub layout: Option<Layout>,
     pub width_constraint: Option<WidthConstraint>,
+    pub height_hint: Option<u16>,
 }
 
 /// A registered effect for a node.
@@ -371,6 +374,8 @@ pub(crate) struct Node {
     pub hook_event: Option<Box<dyn AnyEventHook>>,
     /// Hook-declared event handler (capture phase).
     pub hook_capture: Option<Box<dyn AnyEventHook>>,
+    /// Hook-declared height hint (overrides component's desired_height).
+    pub hook_height_hint: Option<u16>,
     /// Whether this node was built with slot children from a parent.
     /// Nodes with slot children cannot be safely re-reconciled without
     /// the parent's element tree, so the pre-render refresh skips them.
@@ -402,6 +407,7 @@ impl Node {
             hook_cursor: None,
             hook_event: None,
             hook_capture: None,
+            hook_height_hint: None,
             has_slot: false,
         }
     }

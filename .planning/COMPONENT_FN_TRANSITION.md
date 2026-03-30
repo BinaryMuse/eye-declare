@@ -108,7 +108,7 @@ Old: struct + `impl_slot_children!` macro. New: `#[component(children = Elements
 
 | # | Task | Effort | Status |
 |---|------|--------|--------|
-| 4A | `hooks.use_height_hint(n)` for explicit height declarations | Low | Pending |
+| 4A | `hooks.use_height_hint(n)` for explicit height declarations | Low | Done |
 | 4B | `children = SomeType` support in `#[component]` (data children) | High | Pending |
 | 4C | Typed event emission (`ctx.emit()`) | Medium | Pending |
 | 4D | `use_ref` / imperative handles for parent-to-child state access | Medium | Pending |

@@ -793,6 +793,7 @@ impl Renderer {
         if let Some(wc) = output.width_constraint {
             self.nodes[id].width_constraint = wc;
         }
+        self.nodes[id].hook_height_hint = output.height_hint;
 
         // Return Some even when empty if the node already has children,
         // so reconcile_children can tombstone them on transition to empty.
@@ -1068,6 +1069,12 @@ impl Renderer {
             return node.last_height.unwrap_or(0);
         }
 
+        // Hook-declared height hint takes priority over everything.
+        if let Some(h) = node.hook_height_hint {
+            self.nodes[id].last_height = Some(h);
+            return h;
+        }
+
         let height = if node.is_container() {
             let insets = node
                 .component
@@ -1112,7 +1119,6 @@ impl Renderer {
 
             let state = self.nodes[id].state.inner_as_any();
             if let Some(h) = self.nodes[id].component.desired_height_erased(width, state) {
-                // Component declared its height — no probe needed.
                 h
             } else {
                 // Probe render: auto-growing buffer to measure actual content.
@@ -1461,6 +1467,41 @@ mod tests {
         r.push(TallBlock { lines: 100 });
         let frame = r.render();
         assert_eq!(frame.area().height, 100);
+    }
+
+    #[test]
+    fn use_height_hint_skips_probe_render() {
+        // A #[component] function can declare a fixed height via
+        // hooks.use_height_hint(), skipping probe-render measurement.
+        #[derive(Default)]
+        struct FixedHeight;
+        impl Component for FixedHeight {
+            type State = ();
+            fn update(&self, hooks: &mut Hooks<()>, _state: &(), _children: Elements) -> Elements {
+                hooks.use_height_hint(3);
+                let mut els = Elements::new();
+                els.add(crate::Canvas::new(|area: Rect, buf: &mut Buffer| {
+                    for y in 0..area.height {
+                        buf.set_string(
+                            area.x,
+                            area.y + y,
+                            "x",
+                            ratatui_core::style::Style::default(),
+                        );
+                    }
+                }));
+                els
+            }
+        }
+
+        let mut r = Renderer::new(10);
+        let container = r.push(VStack);
+        let mut els = Elements::new();
+        els.add(FixedHeight);
+        r.rebuild(container, els);
+        let frame = r.render();
+        // Height should be 3 (from use_height_hint), not probe-measured
+        assert_eq!(frame.area().height, 3);
     }
 
     // --- Existing tests (flat API, should still pass) ---

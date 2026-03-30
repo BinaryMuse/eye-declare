@@ -31,6 +31,7 @@ pub(crate) type Decomposed<S> = (
     Option<Box<dyn AnyEventHook>>,
     Option<Layout>,
     Option<WidthConstraint>,
+    Option<u16>,
 );
 
 /// Effect collector for declarative lifecycle management.
@@ -76,6 +77,7 @@ pub struct Hooks<S: 'static> {
     capture_hook: Option<Box<dyn AnyEventHook>>,
     layout: Option<Layout>,
     width_constraint: Option<WidthConstraint>,
+    height_hint: Option<u16>,
     _marker: PhantomData<S>,
 }
 
@@ -100,6 +102,7 @@ impl<S: Send + Sync + 'static> Hooks<S> {
             capture_hook: None,
             layout: None,
             width_constraint: None,
+            height_hint: None,
             _marker: PhantomData,
         }
     }
@@ -299,6 +302,15 @@ impl<S: Send + Sync + 'static> Hooks<S> {
         self.width_constraint = Some(constraint);
     }
 
+    /// Declare a fixed height for this component.
+    ///
+    /// The framework skips probe-render measurement and uses this value
+    /// directly. Useful for components that fill their given area (e.g.,
+    /// bordered inputs) or that know their height upfront.
+    pub fn use_height_hint(&mut self, height: u16) {
+        self.height_hint = Some(height);
+    }
+
     /// Consume the hooks, returning effects, provided contexts, and consumers.
     pub(crate) fn decompose(self) -> Decomposed<S> {
         (
@@ -313,6 +325,7 @@ impl<S: Send + Sync + 'static> Hooks<S> {
             self.capture_hook,
             self.layout,
             self.width_constraint,
+            self.height_hint,
         )
     }
 }
