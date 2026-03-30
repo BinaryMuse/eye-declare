@@ -1,5 +1,5 @@
 use proc_macro2::TokenStream;
-use quote::quote;
+use quote::{format_ident, quote};
 use syn::{Ident, ItemFn, Token, parse2};
 
 fn is_hooks_type(ty: &syn::Type) -> bool {
@@ -17,10 +17,23 @@ fn is_hooks_type(ty: &syn::Type) -> bool {
     }
 }
 
+/// Check whether a type is `Elements` (matches the last path segment).
+fn is_elements_type(ty: &syn::Type) -> bool {
+    if let syn::Type::Path(type_path) = ty {
+        type_path
+            .path
+            .segments
+            .last()
+            .is_some_and(|seg| seg.ident == "Elements" && seg.arguments.is_empty())
+    } else {
+        false
+    }
+}
+
 struct ComponentArgs {
     props: Ident,
     state: Option<Ident>,
-    children: Option<Ident>,
+    children: Option<syn::Type>,
     initial_state: Option<syn::Expr>,
     crate_path: Option<syn::Path>,
 }
@@ -53,7 +66,7 @@ impl syn::parse::Parse for ComponentArgs {
                     state = Some(value);
                 }
                 "children" => {
-                    let value: Ident = input.parse()?;
+                    let value: syn::Type = input.parse()?;
                     children = Some(value);
                 }
                 "crate_path" => {
@@ -115,6 +128,7 @@ pub fn component_impl(attr: TokenStream, input: TokenStream) -> syn::Result<Toke
 
     let has_state = args.state.is_some();
     let has_children = args.children.is_some();
+    let is_slot_children = args.children.as_ref().is_some_and(is_elements_type);
 
     let param_count = func.sig.inputs.len();
 
@@ -175,6 +189,57 @@ pub fn component_impl(attr: TokenStream, input: TokenStream) -> syn::Result<Toke
         ));
     }
 
+    let initial_state_impl = match &args.initial_state {
+        Some(expr) => quote! {
+            fn initial_state(&self) -> Option<#state_type> {
+                Some(#expr)
+            }
+        },
+        None => quote! {},
+    };
+
+    if has_children && !is_slot_children {
+        // --- Data children path ---
+        generate_data_children(
+            &func,
+            func_name,
+            props_type,
+            &crate_path,
+            &state_type,
+            has_state,
+            has_hooks,
+            &initial_state_impl,
+            args.children.as_ref().unwrap(),
+        )
+    } else {
+        // --- Slot children (Elements) or no children ---
+        generate_slot_or_none(
+            &func,
+            func_name,
+            props_type,
+            &crate_path,
+            &state_type,
+            has_state,
+            has_hooks,
+            has_children,
+            &initial_state_impl,
+        )
+    }
+}
+
+/// Generate code for components with slot children (Elements) or no children.
+#[allow(clippy::too_many_arguments)]
+fn generate_slot_or_none(
+    func: &ItemFn,
+    func_name: &Ident,
+    props_type: &Ident,
+    crate_path: &TokenStream,
+    state_type: &TokenStream,
+    has_state: bool,
+    has_hooks: bool,
+    has_children: bool,
+    initial_state_impl: &TokenStream,
+) -> syn::Result<TokenStream> {
     let update_call = {
         let mut call_args = vec![quote! { self }];
         if has_state {
@@ -189,15 +254,6 @@ pub fn component_impl(attr: TokenStream, input: TokenStream) -> syn::Result<Toke
         quote! { #func_name(#(#call_args),*) }
     };
 
-    let initial_state_impl = match &args.initial_state {
-        Some(expr) => quote! {
-            fn initial_state(&self) -> Option<#state_type> {
-                Some(#expr)
-            }
-        },
-        None => quote! {},
-    };
-
     let update_impl = quote! {
         fn update(
             &self,
@@ -209,22 +265,20 @@ pub fn component_impl(attr: TokenStream, input: TokenStream) -> syn::Result<Toke
         }
     };
 
-    let child_collector = match &args.children {
-        Some(child_type) if child_type == "Elements" => {
-            quote! {
-                #crate_path::impl_slot_children!(#props_type);
+    let child_collector = if has_children {
+        // Slot children: generate ChildCollector inline (replaces impl_slot_children!)
+        quote! {
+            impl #crate_path::ChildCollector for #props_type {
+                type Collector = #crate_path::Elements;
+                type Output = #crate_path::ComponentWithSlot<#props_type>;
+
+                fn finish(self, collector: #crate_path::Elements) -> #crate_path::ComponentWithSlot<#props_type> {
+                    #crate_path::ComponentWithSlot::new(self, collector)
+                }
             }
         }
-        Some(child_type) => {
-            return Err(syn::Error::new_spanned(
-                child_type,
-                format!(
-                    "only `children = Elements` is currently supported; \
-                     data children (`children = {child_type}`) require additional design"
-                ),
-            ));
-        }
-        None => quote! {},
+    } else {
+        quote! {}
     };
 
     Ok(quote! {
@@ -238,5 +292,113 @@ pub fn component_impl(attr: TokenStream, input: TokenStream) -> syn::Result<Toke
         }
 
         #child_collector
+    })
+}
+
+/// Generate code for components with data children (non-Elements).
+///
+/// Produces:
+/// 1. A hidden wrapper struct holding props + collected data
+/// 2. Component impl on props type (for no-children usage, with empty data)
+/// 3. Component impl on wrapper (for with-children usage, with real data)
+/// 4. ChildCollector impl on props type → output is the wrapper
+#[allow(clippy::too_many_arguments)]
+fn generate_data_children(
+    func: &ItemFn,
+    func_name: &Ident,
+    props_type: &Ident,
+    crate_path: &TokenStream,
+    state_type: &TokenStream,
+    has_state: bool,
+    has_hooks: bool,
+    initial_state_impl: &TokenStream,
+    children_type: &syn::Type,
+) -> syn::Result<TokenStream> {
+    let wrapper_name = format_ident!("__{props_type}WithData");
+
+    // Build update call for the props-type impl (no data children).
+    // The function receives a reference to default (empty) data.
+    let props_update_call = {
+        let mut call_args = vec![quote! { self }];
+        if has_state {
+            call_args.push(quote! { __state });
+        }
+        if has_hooks {
+            call_args.push(quote! { __hooks });
+        }
+        call_args.push(quote! { &__default_data });
+        quote! { #func_name(#(#call_args),*) }
+    };
+
+    // Build update call for the wrapper impl (with data children).
+    // Props come from self.__props, data from self.__data.
+    let wrapper_update_call = {
+        let mut call_args = vec![quote! { &self.__props }];
+        if has_state {
+            call_args.push(quote! { __state });
+        }
+        if has_hooks {
+            call_args.push(quote! { __hooks });
+        }
+        call_args.push(quote! { &self.__data });
+        quote! { #func_name(#(#call_args),*) }
+    };
+
+    Ok(quote! {
+        #func
+
+        // Component impl on props type: for usage without data children.
+        // Passes default (empty) data to the function.
+        impl #crate_path::Component for #props_type {
+            type State = #state_type;
+
+            #initial_state_impl
+
+            fn update(
+                &self,
+                __hooks: &mut #crate_path::Hooks<Self::State>,
+                __state: &Self::State,
+                __children: #crate_path::Elements,
+            ) -> #crate_path::Elements {
+                let __default_data = <#children_type as Default>::default();
+                #props_update_call
+            }
+        }
+
+        // Hidden wrapper: props + collected data children.
+        #[doc(hidden)]
+        pub struct #wrapper_name {
+            __props: #props_type,
+            __data: #children_type,
+        }
+
+        // Component impl on wrapper: for usage with data children.
+        impl #crate_path::Component for #wrapper_name {
+            type State = #state_type;
+
+            #initial_state_impl
+
+            fn update(
+                &self,
+                __hooks: &mut #crate_path::Hooks<Self::State>,
+                __state: &Self::State,
+                __children: #crate_path::Elements,
+            ) -> #crate_path::Elements {
+                #wrapper_update_call
+            }
+        }
+
+        // ChildCollector: element! macro uses this when braces are present.
+        impl #crate_path::ChildCollector for #props_type {
+            type Collector = #children_type;
+            type Output = #wrapper_name;
+
+            fn finish(self, collector: #children_type) -> #wrapper_name {
+                #wrapper_name {
+                    __props: self,
+                    __data: collector,
+                }
+            }
+        }
     })
 }

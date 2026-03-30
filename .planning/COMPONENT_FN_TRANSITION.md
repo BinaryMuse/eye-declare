@@ -52,9 +52,9 @@ All behavioral methods have hook equivalents. The remaining `render()` and `cont
 
 Solved by the `update()` trait method. `#[component]` now generates an `update()` override that calls the user function once with real hooks and real children. The default `update()` implementation chains `lifecycle()` then `view()` for backward compatibility with hand-written primitives.
 
-### F4. Data children not supported
+### F4. ~~Data children not supported~~ (Resolved in Wave 4B)
 
-`#[component]` only supports `children = Elements`. Components like TextBlock that accept typed data children (`Line`/`Span`) must use manual `ChildCollector` + `DataChildren<T>`.
+`#[component]` now supports `children = DataChildren<T>` (or any collector type). The macro generates a hidden wrapper struct + ChildCollector impl. The function receives data children by reference.
 
 ### F5. ~~Fragile parameter detection~~ (Resolved in Wave 1B)
 
@@ -86,9 +86,8 @@ Old: struct + `impl_slot_children!` macro. New: `#[component(children = Elements
 | 2D | Keep View as hand-written primitive (fundamental building block) | Done — kept by design |
 | 2E | Keep Canvas as hand-written primitive (fundamental building block) | Done — kept by design |
 
-> **Blocked**: TextBlock/Line/Span require `children = DataChildren<T>` support in
-> `#[component]` (Wave 4B). They use the data children pattern, which the macro
-> does not yet support.
+> **Unblocked**: TextBlock/Line/Span can now be migrated to `#[component]` using
+> `children = DataChildren<T>` (Wave 4B complete).
 
 ### Wave 3 — Structural simplification ✅ (3D, 3E deferred)
 
@@ -109,7 +108,7 @@ Old: struct + `impl_slot_children!` macro. New: `#[component(children = Elements
 | # | Task | Effort | Status |
 |---|------|--------|--------|
 | 4A | `hooks.use_height_hint(n)` for explicit height declarations | Low | Done |
-| 4B | `children = SomeType` support in `#[component]` (data children) | High | Pending |
+| 4B | `children = SomeType` support in `#[component]` (data children) | High | Done |
 | 4C | Typed event emission (`ctx.emit()`) | Medium | Pending |
 | 4D | `use_ref` / imperative handles for parent-to-child state access | Medium | Pending |
 | 4E | Effects / async in components | High | Pending |

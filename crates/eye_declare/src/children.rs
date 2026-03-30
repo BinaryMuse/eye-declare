@@ -167,6 +167,11 @@ impl<T> DataChildren<T> {
     pub fn into_vec(self) -> Vec<T> {
         self.0
     }
+
+    /// Borrow the collected children as a slice.
+    pub fn as_slice(&self) -> &[T] {
+        &self.0
+    }
 }
 
 impl<T> Default for DataChildren<T> {
