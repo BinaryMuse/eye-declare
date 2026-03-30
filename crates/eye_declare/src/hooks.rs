@@ -94,7 +94,8 @@ pub struct Hooks<P: 'static, S: 'static> {
 // for data-children wrappers. This is sound only because P is phantom. This assertion
 // catches any future change that adds a P-typed field.
 const _: () = {
-    assert!(std::mem::size_of::<Hooks<u8, ()>>() == std::mem::size_of::<Hooks<u64, ()>>(),);
+    assert!(std::mem::size_of::<Hooks<u8, ()>>() == std::mem::size_of::<Hooks<u64, ()>>());
+    assert!(std::mem::align_of::<Hooks<u8, ()>>() == std::mem::align_of::<Hooks<u64, ()>>());
 };
 
 impl<P: Send + Sync + 'static, S: Send + Sync + 'static> Default for Hooks<P, S> {
@@ -128,15 +129,17 @@ impl<P: Send + Sync + 'static, S: Send + Sync + 'static> Hooks<P, S> {
     ///
     /// The `handler` is called each time `interval` elapses during
     /// the framework's tick cycle. The handler receives the component's
-    /// current props and `&mut State`; any mutations automatically mark
-    /// the component dirty.
+    /// current props and `&mut Tracked<State>`. Mutations through
+    /// [`DerefMut`](std::ops::DerefMut) automatically mark the component
+    /// dirty; use [`Tracked::read()`] to access state without triggering
+    /// a re-render.
     ///
     /// Commonly used for animations (e.g., the built-in [`Spinner`](crate::Spinner)
     /// uses an 80ms interval to cycle frames).
     pub fn use_interval(
         &mut self,
         interval: Duration,
-        handler: impl Fn(&P, &mut S) + Send + Sync + 'static,
+        handler: impl Fn(&P, &mut Tracked<S>) + Send + Sync + 'static,
     ) {
         self.effects.push(Effect {
             handler: Box::new(TypedEffectHandler {
@@ -153,7 +156,7 @@ impl<P: Send + Sync + 'static, S: Send + Sync + 'static> Hooks<P, S> {
     ///
     /// Use this for one-time initialization that depends on state being
     /// available (e.g., recording a start time, fetching initial data).
-    pub fn use_mount(&mut self, handler: impl Fn(&P, &mut S) + Send + Sync + 'static) {
+    pub fn use_mount(&mut self, handler: impl Fn(&P, &mut Tracked<S>) + Send + Sync + 'static) {
         self.effects.push(Effect {
             handler: Box::new(TypedEffectHandler {
                 handler: Box::new(handler),
@@ -166,7 +169,7 @@ impl<P: Send + Sync + 'static, S: Send + Sync + 'static> Hooks<P, S> {
     /// from the tree.
     ///
     /// Use this for cleanup: logging, cancelling external resources, etc.
-    pub fn use_unmount(&mut self, handler: impl Fn(&P, &mut S) + Send + Sync + 'static) {
+    pub fn use_unmount(&mut self, handler: impl Fn(&P, &mut Tracked<S>) + Send + Sync + 'static) {
         self.effects.push(Effect {
             handler: Box::new(TypedEffectHandler {
                 handler: Box::new(handler),
@@ -338,7 +341,8 @@ impl<P: Send + Sync + 'static, S: Send + Sync + 'static> Hooks<P, S> {
     ///
     /// The handler receives the available width, the component's current
     /// props, and state, and returns the desired height (or `None` to
-    /// fall back to probe-render measurement).
+    /// fall back to [`use_height_hint`](Hooks::use_height_hint) if set,
+    /// or probe-render measurement otherwise).
     ///
     /// This takes priority over [`use_height_hint`](Hooks::use_height_hint)
     /// since it is width-aware. Use `use_height_hint` instead when the

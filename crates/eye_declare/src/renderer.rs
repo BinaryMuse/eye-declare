@@ -480,7 +480,10 @@ impl Renderer {
         effects.retain(|e| !matches!(e.kind, EffectKind::Interval { .. }));
         effects.push(Effect {
             handler: Box::new(TypedEffectHandler::<C, C::State> {
-                handler: Box::new(move |_props: &C, state: &mut C::State| handler(state)),
+                handler: Box::new(move |_props: &C, state: &mut Tracked<C::State>| {
+                    use std::ops::DerefMut;
+                    handler(state.deref_mut());
+                }),
             }),
             kind: EffectKind::Interval {
                 interval,
@@ -510,7 +513,10 @@ impl Renderer {
     ) {
         self.effects.entry(id).or_default().push(Effect {
             handler: Box::new(TypedEffectHandler::<C, C::State> {
-                handler: Box::new(move |_props: &C, state: &mut C::State| handler(state)),
+                handler: Box::new(move |_props: &C, state: &mut Tracked<C::State>| {
+                    use std::ops::DerefMut;
+                    handler(state.deref_mut());
+                }),
             }),
             kind: EffectKind::OnMount,
         });
@@ -530,7 +536,10 @@ impl Renderer {
         effects.retain(|e| !matches!(e.kind, EffectKind::OnUnmount));
         effects.push(Effect {
             handler: Box::new(TypedEffectHandler::<C, C::State> {
-                handler: Box::new(move |_props: &C, state: &mut C::State| handler(state)),
+                handler: Box::new(move |_props: &C, state: &mut Tracked<C::State>| {
+                    use std::ops::DerefMut;
+                    handler(state.deref_mut());
+                }),
             }),
             kind: EffectKind::OnUnmount,
         });

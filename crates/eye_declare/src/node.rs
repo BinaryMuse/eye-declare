@@ -225,10 +225,12 @@ pub(crate) trait AnyEffectHandler: Send + Sync {
     fn call(&self, component: &dyn Any, tracked_state: &mut dyn Any);
 }
 
-/// Typed wrapper that captures a closure operating on `&P` and `&mut S`
-/// and downcasts both at call time. `DerefMut` on `Tracked`
-/// automatically marks state dirty when the handler fires.
-type EffectHandlerFn<P, S> = Box<dyn Fn(&P, &mut S) + Send + Sync>;
+/// Typed wrapper that captures a closure operating on `&P` and
+/// `&mut Tracked<S>`, downcasting both at call time. The handler
+/// receives `Tracked` directly so it can use `state.read()` for
+/// non-mutating access (avoiding unnecessary dirty marking) or
+/// mutate through `DerefMut` which marks dirty automatically.
+type EffectHandlerFn<P, S> = Box<dyn Fn(&P, &mut Tracked<S>) + Send + Sync>;
 
 pub(crate) struct TypedEffectHandler<P: 'static, S: 'static> {
     pub(crate) handler: EffectHandlerFn<P, S>,
@@ -244,8 +246,7 @@ impl<P: Send + Sync + 'static, S: Send + Sync + 'static> AnyEffectHandler
         let tracked = tracked_state
             .downcast_mut::<Tracked<S>>()
             .expect("state type mismatch in effect handler");
-        use std::ops::DerefMut;
-        (self.handler)(props, tracked.deref_mut());
+        (self.handler)(props, tracked);
     }
 }
 
