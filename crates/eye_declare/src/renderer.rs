@@ -798,17 +798,35 @@ impl Renderer {
     ) -> (ProvidedContexts, Option<Elements>) {
         let children = slot.unwrap_or_default();
 
-        let (output, result) = {
+        let (mut output, result) = {
             let context = &self.context;
             let node = &mut self.nodes[id];
             node.component
                 .update_erased(node.state.as_any_mut(), context, children)
         };
 
-        // Apply lifecycle output
+        // Apply lifecycle output.
+        // Preserve last_tick from existing interval effects so that rebuilds
+        // don't restart animation timers. Hooks maintain call-order stability,
+        // so positional matching is correct.
         if output.effects.is_empty() {
             self.effects.remove(&id);
         } else {
+            if let Some(old_effects) = self.effects.get(&id) {
+                for (new_eff, old_eff) in output.effects.iter_mut().zip(old_effects.iter()) {
+                    if let (
+                        EffectKind::Interval {
+                            last_tick: new_lt, ..
+                        },
+                        EffectKind::Interval {
+                            last_tick: old_lt, ..
+                        },
+                    ) = (&mut new_eff.kind, &old_eff.kind)
+                    {
+                        *new_lt = *old_lt;
+                    }
+                }
+            }
             self.effects.insert(id, output.effects);
         }
         self.nodes[id].autofocus = output.autofocus;
