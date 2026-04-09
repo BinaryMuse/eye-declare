@@ -60,6 +60,11 @@ pub struct Viewport {
     /// Style applied to the border.
     #[builder(default, setter(into))]
     pub border_style: Style,
+
+    /// Whether to wrap long lines. Default is `true` (word-boundary wrapping).
+    /// Set to `false` to truncate lines at the viewport width instead.
+    #[builder(default = true)]
+    pub wrap: bool,
 }
 
 impl Viewport {
@@ -95,6 +100,31 @@ impl Viewport {
     }
 }
 
+/// Wrap a single line into chunks of at most `max_width` bytes, preferring
+/// word-boundary breaks (spaces). Falls back to hard-break when a word is
+/// longer than `max_width`.
+fn wrap_line<'a>(line: &'a str, max_width: usize, out: &mut Vec<&'a str>) {
+    let mut remaining = line;
+    while !remaining.is_empty() {
+        if remaining.len() <= max_width {
+            out.push(remaining);
+            break;
+        }
+
+        // Find the last space within the max_width window for a clean break
+        let window = &remaining[..max_width];
+        if let Some(last_space) = window.rfind(' ') {
+            // Break at the space — include it on this line so words don't run together
+            out.push(&remaining[..last_space + 1]);
+            remaining = &remaining[last_space + 1..];
+        } else {
+            // No space found — hard break at max_width
+            out.push(&remaining[..max_width]);
+            remaining = &remaining[max_width..];
+        }
+    }
+}
+
 impl Component for Viewport {
     type State = ();
 
@@ -117,29 +147,34 @@ impl Component for Viewport {
             return;
         }
 
-        // Determine which lines to show (tail behavior)
-        let visible_count = self.height as usize;
-        let start = if self.lines.len() > visible_count {
-            self.lines.len() - visible_count
+        // Build screen lines from input, handling overflow based on wrap mode.
+        let max_width = inner.width as usize;
+        let mut screen_lines: Vec<&str> = Vec::new();
+        for line_text in &self.lines {
+            if line_text.len() <= max_width {
+                screen_lines.push(line_text.as_str());
+            } else if self.wrap {
+                wrap_line(line_text, max_width, &mut screen_lines);
+            } else {
+                // Truncate: show only the first max_width bytes
+                screen_lines.push(&line_text[..max_width]);
+            }
+        }
+
+        // Apply tail behavior: show the last `inner.height` screen lines
+        let visible_count = inner.height as usize;
+        let start = if screen_lines.len() > visible_count {
+            screen_lines.len() - visible_count
         } else {
             0
         };
-        let visible_lines = &self.lines[start..];
 
-        // Render visible lines into the inner area
-        for (i, line_text) in visible_lines.iter().enumerate() {
+        // Render visible screen lines
+        for (i, text) in screen_lines[start..].iter().enumerate() {
             let row = inner.y + i as u16;
             if row >= inner.y + inner.height {
                 break;
             }
-
-            // Truncate to fit the viewport width
-            let text = if line_text.len() > inner.width as usize {
-                &line_text[..inner.width as usize]
-            } else {
-                line_text.as_str()
-            };
-
             buf.set_string(inner.x, row, text, self.style);
         }
     }
@@ -231,21 +266,49 @@ mod tests {
     }
 
     #[test]
-    fn viewport_truncates_long_lines() {
+    fn viewport_wraps_long_lines() {
+        // "this is a very long line that should be wrapped"
+        // With width 10, wraps at word boundaries:
+        // "this is a " (10 chars, trailing space at pos 9)
+        // "very long " (10 chars)
+        // "line that " (10 chars)
+        // "should be " (10 chars)
+        // "wrapped"    (7 chars)
+        // 5 screen lines, height 3 → show last 3
         let viewport = Viewport::builder()
             .lines(vec![
-                "this is a very long line that should be truncated".into()
+                "this is a very long line that should be wrapped".into(),
             ])
-            .height(1)
+            .height(3)
             .build();
 
-        let area = Rect::new(0, 0, 10, 1);
+        let area = Rect::new(0, 0, 10, 3);
         let mut buf = Buffer::empty(area);
         viewport.render(area, &mut buf, &());
 
-        // Should show first 10 chars only
-        assert_eq!(buf.cell((9, 0)).unwrap().symbol(), " ");
-        assert_eq!(buf.cell((0, 0)).unwrap().symbol(), "t"); // "this is a "
+        // Last 3 wrapped lines: "line that ", "should be ", "wrapped"
+        assert_eq!(buf.cell((0, 0)).unwrap().symbol(), "l"); // "line..."
+        assert_eq!(buf.cell((0, 1)).unwrap().symbol(), "s"); // "should..."
+        assert_eq!(buf.cell((0, 2)).unwrap().symbol(), "w"); // "wrapped"
+    }
+
+    #[test]
+    fn viewport_hard_wraps_long_words() {
+        // A single word longer than the viewport width
+        let viewport = Viewport::builder()
+            .lines(vec!["abcdefghijklmnopqrstuvwxyz".into()])
+            .height(3)
+            .build();
+
+        let area = Rect::new(0, 0, 10, 3);
+        let mut buf = Buffer::empty(area);
+        viewport.render(area, &mut buf, &());
+
+        // Hard break at 10: "abcdefghij", "klmnopqrst", "uvwxyz"
+        // 3 screen lines, height 3 → show all
+        assert_eq!(buf.cell((0, 0)).unwrap().symbol(), "a");
+        assert_eq!(buf.cell((0, 1)).unwrap().symbol(), "k");
+        assert_eq!(buf.cell((0, 2)).unwrap().symbol(), "u");
     }
 
     #[test]
