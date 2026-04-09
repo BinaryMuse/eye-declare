@@ -7,8 +7,8 @@ use ratatui_core::layout::Rect;
 use crate::component::{EventResult, Tracked};
 use crate::context::ContextMap;
 use crate::node::{
-    AnyCursorHook, AnyDesiredHeightHook, AnyEventHook, Effect, EffectKind, Layout, TypedCursorHook,
-    TypedDesiredHeightHook, TypedEffectHandler, TypedEventHook, WidthConstraint,
+    AnyCursorHook, AnyDesiredHeightHook, AnyEventHook, CallSite, Effect, EffectKind, Layout,
+    TypedCursorHook, TypedDesiredHeightHook, TypedEffectHandler, TypedEventHook, WidthConstraint,
 };
 
 /// A type-erased context consumer callback.
@@ -138,6 +138,7 @@ impl<P: Send + Sync + 'static, S: Send + Sync + 'static> Hooks<P, S> {
     ///
     /// Commonly used for animations (e.g., the built-in [`Spinner`](crate::Spinner)
     /// uses an 80ms interval to cycle frames).
+    #[track_caller]
     pub fn use_interval(
         &mut self,
         interval: Duration,
@@ -151,6 +152,7 @@ impl<P: Send + Sync + 'static, S: Send + Sync + 'static> Hooks<P, S> {
                 interval,
                 last_tick: Instant::now(),
             },
+            call_site: CallSite::from_location(std::panic::Location::caller()),
         });
     }
 
@@ -158,12 +160,14 @@ impl<P: Send + Sync + 'static, S: Send + Sync + 'static> Hooks<P, S> {
     ///
     /// Use this for one-time initialization that depends on state being
     /// available (e.g., recording a start time, fetching initial data).
+    #[track_caller]
     pub fn use_mount(&mut self, handler: impl Fn(&P, &mut Tracked<S>) + Send + Sync + 'static) {
         self.effects.push(Effect {
             handler: Box::new(TypedEffectHandler {
                 handler: Box::new(handler),
             }),
             kind: EffectKind::OnMount,
+            call_site: CallSite::from_location(std::panic::Location::caller()),
         });
     }
 
@@ -171,12 +175,14 @@ impl<P: Send + Sync + 'static, S: Send + Sync + 'static> Hooks<P, S> {
     /// from the tree.
     ///
     /// Use this for cleanup: logging, cancelling external resources, etc.
+    #[track_caller]
     pub fn use_unmount(&mut self, handler: impl Fn(&P, &mut Tracked<S>) + Send + Sync + 'static) {
         self.effects.push(Effect {
             handler: Box::new(TypedEffectHandler {
                 handler: Box::new(handler),
             }),
             kind: EffectKind::OnUnmount,
+            call_site: CallSite::from_location(std::panic::Location::caller()),
         });
     }
 

@@ -9,7 +9,8 @@ use crate::context::{ContextMap, ProvidedContexts, SavedContext};
 use crate::element::{ElementEntry, Elements};
 use crate::frame::Frame;
 use crate::node::{
-    Effect, EffectKind, Layout, Node, NodeArena, NodeId, TypedEffectHandler, WidthConstraint,
+    CallSite, Effect, EffectKind, Layout, Node, NodeArena, NodeId, TypedEffectHandler,
+    WidthConstraint,
 };
 
 /// Manages a tree of components and renders them into a Frame.
@@ -473,6 +474,7 @@ impl Renderer {
     /// dirty automatically when the handler fires.
     ///
     /// Only one tick per node. Re-registering replaces the previous one.
+    #[track_caller]
     pub fn register_tick<C: Component>(
         &mut self,
         id: NodeId,
@@ -493,6 +495,7 @@ impl Renderer {
                 interval,
                 last_tick: Instant::now(),
             },
+            call_site: CallSite::from_location(std::panic::Location::caller()),
         });
     }
 
@@ -510,6 +513,7 @@ impl Renderer {
     ///
     /// The handler fires once after the element's `build()` completes
     /// and the node is placed in the tree. It is then removed (one-shot).
+    #[track_caller]
     pub fn on_mount<C: Component>(
         &mut self,
         id: NodeId,
@@ -523,6 +527,7 @@ impl Renderer {
                 }),
             }),
             kind: EffectKind::OnMount,
+            call_site: CallSite::from_location(std::panic::Location::caller()),
         });
     }
 
@@ -530,6 +535,7 @@ impl Renderer {
     ///
     /// The handler fires once when the node is tombstoned (removed from
     /// the tree), before children are recursively cleaned up.
+    #[track_caller]
     pub fn on_unmount<C: Component>(
         &mut self,
         id: NodeId,
@@ -546,6 +552,7 @@ impl Renderer {
                 }),
             }),
             kind: EffectKind::OnUnmount,
+            call_site: CallSite::from_location(std::panic::Location::caller()),
         });
     }
 
@@ -807,21 +814,23 @@ impl Renderer {
 
         // Apply lifecycle output.
         // Preserve last_tick from existing interval effects so that rebuilds
-        // don't restart animation timers. Hooks maintain call-order stability,
-        // so positional matching is correct.
+        // don't restart animation timers. Effects are matched by call site
+        // (source location), so conditional effects work correctly.
         if output.effects.is_empty() {
             self.effects.remove(&id);
         } else {
             if let Some(old_effects) = self.effects.get(&id) {
-                for (new_eff, old_eff) in output.effects.iter_mut().zip(old_effects.iter()) {
-                    if let (
-                        EffectKind::Interval {
-                            last_tick: new_lt, ..
-                        },
-                        EffectKind::Interval {
+                for new_eff in output.effects.iter_mut() {
+                    if let EffectKind::Interval {
+                        last_tick: new_lt, ..
+                    } = &mut new_eff.kind
+                        && let Some(old_eff) = old_effects.iter().find(|old| {
+                            old.call_site == new_eff.call_site
+                                && matches!(old.kind, EffectKind::Interval { .. })
+                        })
+                        && let EffectKind::Interval {
                             last_tick: old_lt, ..
-                        },
-                    ) = (&mut new_eff.kind, &old_eff.kind)
+                        } = &old_eff.kind
                     {
                         *new_lt = *old_lt;
                     }
@@ -4145,6 +4154,109 @@ mod tests {
         r.tick();
 
         assert!(r.state_mut::<HookedCounter>(id).1 > 0); // count incremented
+    }
+
+    #[test]
+    fn conditional_effect_matches_by_call_site_not_position() {
+        // Regression test: when a conditional interval at position 0
+        // disappears, the remaining interval shifts from position 1 → 0.
+        //
+        // With positional (zip) matching, the shifted interval inherits
+        // the conditional interval's stale last_tick. If the conditional
+        // was a slow interval that never fired, its last_tick is from
+        // creation time — potentially much older than the fast interval's
+        // recently-updated last_tick. This causes the fast interval to
+        // fire spuriously on the next tick.
+        //
+        // With call-site matching, each interval finds its own prior
+        // incarnation regardless of position, preserving correct timing.
+
+        /// State: (mode, slow_count, fast_count).
+        struct ShiftTest;
+        impl Component for ShiftTest {
+            type State = (String, usize, usize);
+
+            fn render(&self, _area: Rect, _buf: &mut Buffer, _state: &Self::State) {}
+
+            fn initial_state(&self) -> Option<Self::State> {
+                Some(("both".into(), 0, 0))
+            }
+
+            fn lifecycle(&self, hooks: &mut Hooks<Self, Self::State>, state: &Self::State) {
+                // Conditional slow interval at position 0.
+                // Its last_tick stays at creation time (never fires in test).
+                if state.0 == "both" {
+                    hooks.use_interval(Duration::from_secs(60), |_props, s| {
+                        s.1 += 1;
+                    });
+                }
+                // Fast interval: position 1 when "both", position 0 when "one".
+                // Its last_tick is updated by tick() — very recent.
+                hooks.use_interval(Duration::from_millis(1), |_props, s| {
+                    s.2 += 1;
+                });
+            }
+        }
+
+        struct ShiftTestEl {
+            mode: String,
+        }
+        impl Element for ShiftTestEl {
+            fn build(self: Box<Self>, renderer: &mut Renderer, parent: NodeId) -> NodeId {
+                let id = renderer.append_child(parent, ShiftTest);
+                renderer.state_mut::<ShiftTest>(id).0 = self.mode;
+                id
+            }
+            fn update(self: Box<Self>, renderer: &mut Renderer, node_id: NodeId) {
+                renderer.state_mut::<ShiftTest>(node_id).0 = self.mode;
+            }
+        }
+
+        let mut r = Renderer::new(10);
+        let container = r.push(VStack);
+
+        // Step 1: Build with both intervals.
+        // Old effects: [slow(60s, last_tick=T0), fast(1ms, last_tick=T0)]
+        let mut els = Elements::new();
+        els.add_element(ShiftTestEl {
+            mode: "both".into(),
+        })
+        .key("c");
+        r.rebuild(container, els);
+
+        // Step 2: Wait and tick. The fast interval fires (last_tick → T1≈now).
+        // The slow interval does NOT fire (last_tick stays at T0).
+        // Old effects: [slow(60s, last_tick=T0), fast(1ms, last_tick=T1)]
+        std::thread::sleep(Duration::from_millis(10));
+        r.tick();
+
+        let id = r.find_by_key(container, "c").unwrap();
+        let fast_count_after_tick = r.state_mut::<ShiftTest>(id).2;
+        assert!(fast_count_after_tick > 0, "fast interval should have fired");
+
+        // Step 3: Remove the conditional slow interval. Fast shifts 1 → 0.
+        // New effects: [fast(1ms, last_tick=now)]
+        //
+        // Positional zip would match new[0](fast) with old[0](slow),
+        // giving fast the slow interval's last_tick (T0, ~10ms ago).
+        // Then tick: now - T0 ≈ 10ms >= 1ms → fires! Wrong.
+        //
+        // Call-site matching finds old fast by call site, preserving
+        // fast's own last_tick (T1, ~now). Tick: 0ms < 1ms → doesn't fire.
+        let mut els = Elements::new();
+        els.add_element(ShiftTestEl { mode: "one".into() }).key("c");
+        r.rebuild(container, els);
+
+        // Step 4: Tick immediately (no sleep). Only with the wrong last_tick
+        // would the fast interval fire again.
+        r.tick();
+        assert_eq!(
+            r.state_mut::<ShiftTest>(id).2,
+            fast_count_after_tick,
+            "fast interval should NOT have fired again immediately after rebuild — \
+             with call-site matching it keeps its own recent last_tick, \
+             not the slow interval's stale one from position 0"
+        );
     }
 
     #[test]
