@@ -1,3 +1,13 @@
+## [0.4.0](https://github.com/atuinsh/eye-declare/compare/v0.3.0..v0.4.0) - 2026-04-09
+
+### ⛰️ Features
+
+- Add viewport component ([#24](https://github.com/atuinsh/eye-declare/issues/24)) - ([96dbf00](https://github.com/atuinsh/eye-declare/commit/96dbf00881a433a03d7088f18e3ce3d933b4ca76))
+- Allow fetching app state ([#26](https://github.com/atuinsh/eye-declare/issues/26)) - ([190408a](https://github.com/atuinsh/eye-declare/commit/190408a149cd0e09963388a4ed8d9c17ad98f451))
+
+### 🐛 Bug Fixes
+
+- Persist interval effects across re-renders ([#25](https://github.com/atuinsh/eye-declare/issues/25)) - ([1d0841c](https://github.com/atuinsh/eye-declare/commit/1d0841ce385c238b725ed0146c1dd32d2036bfa9))
 ## [0.3.0](https://github.com/atuinsh/eye-declare/compare/v0.2.1..v0.3.0) - 2026-03-30
 
 ### ⛰️ Features
