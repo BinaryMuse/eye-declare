@@ -1,4 +1,5 @@
 use std::any::{Any, TypeId};
+use std::panic::Location;
 use std::time::{Duration, Instant};
 
 use ratatui_core::{buffer::Buffer, layout::Rect};
@@ -250,6 +251,28 @@ impl<P: Send + Sync + 'static, S: Send + Sync + 'static> AnyEffectHandler
     }
 }
 
+/// Identifies the source location of a hook call.
+///
+/// Used to match effects across re-renders so that state (like `last_tick`
+/// on intervals) is preserved even when effects are conditionally registered.
+/// Derived from `#[track_caller]` on hook methods.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CallSite {
+    pub file: &'static str,
+    pub line: u32,
+    pub column: u32,
+}
+
+impl CallSite {
+    pub fn from_location(loc: &'static Location<'static>) -> Self {
+        Self {
+            file: loc.file(),
+            line: loc.line(),
+            column: loc.column(),
+        }
+    }
+}
+
 /// What kind of effect this is, and when it should fire.
 pub(crate) enum EffectKind {
     /// Periodic callback. Fires when interval elapses during `tick()`.
@@ -371,6 +394,7 @@ pub(crate) struct LifecycleOutput {
 pub(crate) struct Effect {
     pub handler: Box<dyn AnyEffectHandler>,
     pub kind: EffectKind,
+    pub call_site: CallSite,
 }
 
 /// A node in the component tree. Framework-internal.
