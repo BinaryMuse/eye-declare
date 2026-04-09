@@ -92,7 +92,9 @@ impl Viewport {
                 .borders(borders);
         }
 
-        if let Some(ref title) = self.title {
+        if let Some(ref title) = self.title
+            && self.border.is_some()
+        {
             block = block.title_top(Line::from(format!(" {title} ")));
         }
 
@@ -100,29 +102,51 @@ impl Viewport {
     }
 }
 
-/// Wrap a single line into chunks of at most `max_width` bytes, preferring
-/// word-boundary breaks (spaces). Falls back to hard-break when a word is
-/// longer than `max_width`.
+/// Wrap a single line into chunks of at most `max_width` display columns,
+/// preferring word-boundary breaks (spaces). Falls back to hard-break when a
+/// word is wider than `max_width`. Uses `unicode-width` for correct column
+/// widths with multi-byte and wide characters.
 fn wrap_line<'a>(line: &'a str, max_width: usize, out: &mut Vec<&'a str>) {
+    use unicode_width::UnicodeWidthStr;
+
     let mut remaining = line;
     while !remaining.is_empty() {
-        if remaining.len() <= max_width {
+        if UnicodeWidthStr::width(remaining) <= max_width {
             out.push(remaining);
             break;
         }
 
-        // Find the last space within the max_width window for a clean break
-        let window = &remaining[..max_width];
+        // Walk char-by-char to find the byte offset where we reach max_width columns
+        let break_byte = str_byte_offset_at_width(remaining, max_width);
+        let window = &remaining[..break_byte];
+
         if let Some(last_space) = window.rfind(' ') {
             // Break at the space — include it on this line so words don't run together
             out.push(&remaining[..last_space + 1]);
             remaining = &remaining[last_space + 1..];
         } else {
-            // No space found — hard break at max_width
-            out.push(&remaining[..max_width]);
-            remaining = &remaining[max_width..];
+            // No space found — hard break at the column boundary
+            out.push(window);
+            remaining = &remaining[break_byte..];
         }
     }
+}
+
+/// Return the byte offset into `s` at which the display width reaches
+/// `max_width` columns. If a wide character would straddle the boundary, the
+/// offset is placed before that character.
+fn str_byte_offset_at_width(s: &str, max_width: usize) -> usize {
+    use unicode_width::UnicodeWidthChar;
+
+    let mut cols = 0;
+    for (byte_offset, ch) in s.char_indices() {
+        let w = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if cols + w > max_width {
+            return byte_offset;
+        }
+        cols += w;
+    }
+    s.len()
 }
 
 impl Component for Viewport {
@@ -151,13 +175,14 @@ impl Component for Viewport {
         let max_width = inner.width as usize;
         let mut screen_lines: Vec<&str> = Vec::new();
         for line_text in &self.lines {
-            if line_text.len() <= max_width {
+            if unicode_width::UnicodeWidthStr::width(line_text.as_str()) <= max_width {
                 screen_lines.push(line_text.as_str());
             } else if self.wrap {
                 wrap_line(line_text, max_width, &mut screen_lines);
             } else {
-                // Truncate: show only the first max_width bytes
-                screen_lines.push(&line_text[..max_width]);
+                // Truncate at column boundary
+                let break_byte = str_byte_offset_at_width(line_text, max_width);
+                screen_lines.push(&line_text[..break_byte]);
             }
         }
 
