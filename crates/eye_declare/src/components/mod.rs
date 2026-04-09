@@ -13,9 +13,12 @@ pub mod spinner;
 pub mod text;
 /// Unified layout container. See [`View`].
 pub mod view;
+/// Fixed-height viewport into a text buffer. See [`Viewport`].
+pub mod viewport;
 
 pub use canvas::Canvas;
 pub use markdown::{Markdown, MarkdownState};
 pub use spinner::{Spinner, SpinnerState};
 pub use text::{Span, Text, TextChild};
 pub use view::{Direction, View};
+pub use viewport::Viewport;
