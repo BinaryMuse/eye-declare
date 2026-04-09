@@ -1,6 +1,6 @@
 ---
 title: Built-in Components
-description: Reference for Text, Spinner, Markdown, VStack, HStack, and Column
+description: Reference for Text, Spinner, Markdown, Viewport, VStack, HStack, and Column
 ---
 
 # Built-in Components
@@ -145,6 +145,69 @@ element! {
 | `source` | `String` | `""` | The Markdown text to render |
 
 The component maintains a `MarkdownState` with default styles that can be customized.
+
+## Viewport
+
+A fixed-height window into a list of text lines with automatic tail behavior — always shows the most recent lines. Designed for streaming command output, log tails, and similar content where the latest output matters most.
+
+### Basic usage
+
+```rust
+element! {
+    Viewport(
+        lines: output_lines.clone(),
+        height: 10,
+    )
+}
+```
+
+### With border and title
+
+```rust
+element! {
+    Viewport(
+        lines: output_lines.clone(),
+        height: 10,
+        border: BorderType::Plain,
+        title: "Command output".into(),
+        border_style: Style::default().fg(Color::DarkGray),
+    )
+}
+```
+
+The title is only displayed when a border is present.
+
+### Line wrapping
+
+By default, lines that exceed the viewport width are wrapped at word boundaries. Set `wrap: false` to truncate long lines instead:
+
+```rust
+element! {
+    Viewport(
+        lines: log_lines.clone(),
+        height: 8,
+        wrap: false,
+    )
+}
+```
+
+Wrapping and truncation are Unicode-aware — multi-byte and wide characters (CJK, emoji) are handled correctly using display-width column calculations.
+
+### Tail behavior
+
+The viewport always shows the **last** N visible lines, where N is the `height`. If wrapping is enabled, wrapped lines count toward the visible line budget. If fewer lines exist than the viewport height, content renders from the top.
+
+### Properties
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `lines` | `Vec<String>` | (required) | Lines of text to display |
+| `height` | `u16` | (required) | Visible height in rows (excluding border) |
+| `border` | `Option<BorderType>` | `None` | Optional border type |
+| `title` | `Option<String>` | `None` | Title shown in the top border (requires border) |
+| `style` | `Style` | default | Style applied to text content |
+| `border_style` | `Style` | default | Style applied to the border |
+| `wrap` | `bool` | `true` | Wrap long lines at word boundaries; `false` truncates |
 
 ## VStack
 

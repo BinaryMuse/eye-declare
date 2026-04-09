@@ -193,6 +193,7 @@ pub use components::markdown::{Markdown, MarkdownState};
 pub use components::spinner::{Spinner, SpinnerState};
 pub use components::text::{Span, Text, TextChild};
 pub use components::view::{Direction, View};
+pub use components::viewport::Viewport;
 pub use element::{ElementHandle, Elements};
 
 pub use hooks::Hooks;
