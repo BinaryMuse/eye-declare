@@ -40,10 +40,7 @@ fn mount_label(
     });
 
     let (text, style) = match &state.label {
-        Some(label) => (
-            label.clone(),
-            Style::default().fg(Color::Green),
-        ),
+        Some(label) => (label.clone(), Style::default().fg(Color::Green)),
         None => (
             "[mount has not fired yet]".to_string(),
             Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
