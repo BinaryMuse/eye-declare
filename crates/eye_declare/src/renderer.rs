@@ -448,10 +448,11 @@ impl Renderer {
     /// renderer.rebuild(container, my_view(&state));
     /// ```
     pub fn rebuild(&mut self, parent: NodeId, elements: Elements) {
-        self.reconcile_children(parent, elements.into_items());
-        // Full rebuild reconciles all dirty nodes — no need for the
-        // pre-render refresh pass to repeat that work.
+        // Clear the refresh flag before reconciliation. If mount effects
+        // dirty component state during the rebuild, fire_mount will set
+        // it back to true so refresh_dirty_views runs on the next render.
         self.needs_refresh = false;
+        self.reconcile_children(parent, elements.into_items());
     }
 
     /// Find a direct child of `parent` by its key.
@@ -631,6 +632,12 @@ impl Renderer {
                 effect
                     .handler
                     .call(node.component.props_as_any(), node.state.as_any_mut());
+            }
+
+            // If a mount handler dirtied the state, schedule a refresh so the
+            // component re-renders on the next frame.
+            if self.nodes[id].state.is_dirty() {
+                self.needs_refresh = true;
             }
 
             // Reinsert remaining effects (if any)
