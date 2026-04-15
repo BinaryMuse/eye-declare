@@ -1,3 +1,8 @@
+## [0.4.3](https://github.com/atuinsh/eye-declare/compare/v0.4.2..v0.4.3) - 2026-04-15
+
+### 🐛 Bug Fixes
+
+- Respect EventResult::Consumed in interactive loop ([#29](https://github.com/atuinsh/eye-declare/issues/29)) - ([512e881](https://github.com/atuinsh/eye-declare/commit/512e881a992a61ffa8823ed74fe16c14505840a5))
 ## [0.4.2](https://github.com/atuinsh/eye-declare/compare/v0.4.1..v0.4.2) - 2026-04-14
 
 ### 🐛 Bug Fixes
