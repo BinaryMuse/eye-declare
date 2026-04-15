@@ -30,7 +30,7 @@ use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use futures::StreamExt;
 use tokio::sync::{mpsc, oneshot};
 
-use crate::component::VStack;
+use crate::component::{EventResult, VStack};
 use crate::element::Elements;
 use crate::inline::InlineRenderer;
 use crate::node::NodeId;
@@ -545,8 +545,12 @@ impl<S: Send + 'static> Application<S> {
     }
 
     /// Forward a terminal event to the component tree (focus routing).
-    pub fn handle_event(&mut self, event: &Event) {
-        self.inline.handle_event(event);
+    ///
+    /// Returns [`EventResult::Consumed`] when a component in the tree
+    /// handled the event, or [`EventResult::Ignored`] when no component
+    /// claimed it.
+    pub fn handle_event(&mut self, event: &Event) -> EventResult {
+        self.inline.handle_event(event)
     }
 
     /// Advance active effects (animations, intervals).
@@ -778,16 +782,17 @@ impl<S: Send + 'static> Application<S> {
                         self.dirty = true;
                     } else {
                         // Framework handles first (focus routing, tab cycling)
-                        self.inline.handle_event(&evt);
+                        let result = self.inline.handle_event(&evt);
                         self.dirty = true;
 
-                        // Then app handler, if provided
-                        if let Some(ref mut h) = handler {
-                            let flow = h(&evt, &mut self.state);
-                            if matches!(flow, ControlFlow::Exit) {
-                                break;
+                        // Then app handler, only if the component tree didn't consume the event
+                        if result == EventResult::Ignored
+                            && let Some(ref mut h) = handler {
+                                let flow = h(&evt, &mut self.state);
+                                if matches!(flow, ControlFlow::Exit) {
+                                    break;
+                                }
                             }
-                        }
                     }
                 }
 
