@@ -1401,11 +1401,7 @@ fn allocate_widths(constraints: &[WidthConstraint], total: u16) -> Vec<u16> {
         .count() as u16;
 
     let remaining = total.saturating_sub(fixed_sum);
-    let per_fill = if fill_count > 0 {
-        remaining / fill_count
-    } else {
-        0
-    };
+    let per_fill = remaining.checked_div(fill_count).unwrap_or(0);
     let mut remainder = if fill_count > 0 {
         remaining % fill_count
     } else {
