@@ -187,7 +187,7 @@ pub use cells::Cells;
 pub use children::{
     AddTo, ChildCollector, ComponentWithSlot, DataChildren, DataHandle, SpliceInto,
 };
-pub use component::{Column, Component, EventResult, HStack, Tracked, VStack};
+pub use component::{Column, Component, EventResult, HStack, Tracked, TrackedRef, VStack};
 pub use components::canvas::Canvas;
 pub use components::markdown::{Markdown, MarkdownState};
 pub use components::spinner::{Spinner, SpinnerState};

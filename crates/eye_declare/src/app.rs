@@ -30,12 +30,13 @@ use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use futures::StreamExt;
 use tokio::sync::{mpsc, oneshot};
 
-use crate::component::{EventResult, VStack};
+use crate::component::{EventResult, TrackedRef, VStack};
 use crate::element::Elements;
 use crate::inline::InlineRenderer;
 use crate::node::NodeId;
 
 type StateUpdateFn<S> = Box<dyn FnOnce(&mut S) + Send>;
+type TrackedStateUpdateFn<S> = Box<dyn FnOnce(&mut TrackedRef<'_, S>) + Send>;
 type StateGetFn<S> = Box<dyn FnOnce(&S) + Send>;
 type ViewFn<S> = Box<dyn Fn(&S) -> Elements>;
 type CommitCallbackFn<S> = Box<dyn FnMut(&CommittedElement, &mut S)>;
@@ -43,6 +44,7 @@ type EventHandlerFn<'a, S> = Option<&'a mut dyn FnMut(&Event, &mut S) -> Control
 
 enum AppMessage<S> {
     UpdateState(StateUpdateFn<S>),
+    UpdateStateTracked(TrackedStateUpdateFn<S>),
     GetState(StateGetFn<S>),
 }
 
@@ -137,9 +139,18 @@ impl<S: Send + 'static> Handle<S> {
     /// Queue a state mutation. Applied on the next frame.
     ///
     /// This is non-blocking and can be called from both sync and
-    /// async contexts.
+    /// async contexts. Always triggers a rebuild.
     pub fn update(&self, f: impl FnOnce(&mut S) + Send + 'static) {
         let _ = self.tx.send(AppMessage::UpdateState(Box::new(f)));
+    }
+
+    /// Queue a state mutation with dirty tracking. Only triggers a
+    /// rebuild if the callback actually writes through `DerefMut`.
+    ///
+    /// Use `state.read()` for reads that shouldn't trigger a rebuild,
+    /// and direct field access (which goes through `DerefMut`) for writes.
+    pub fn update_tracked(&self, f: impl FnOnce(&mut TrackedRef<'_, S>) + Send + 'static) {
+        let _ = self.tx.send(AppMessage::UpdateStateTracked(Box::new(f)));
     }
 
     /// Get the current state.
@@ -682,6 +693,9 @@ impl<S: Send + 'static> Application<S> {
                             update(&mut self.state);
                             self.dirty = true;
                         }
+                        Some(AppMessage::UpdateStateTracked(update)) => {
+                            self.apply_tracked_update(update);
+                        }
                         None => {
                             // All Handles dropped
                             channel_open = false;
@@ -802,6 +816,9 @@ impl<S: Send + 'static> Application<S> {
                             update(&mut self.state);
                             self.dirty = true;
                         }
+                        Some(AppMessage::UpdateStateTracked(update)) => {
+                            self.apply_tracked_update(update);
+                        }
                         Some(AppMessage::GetState(get)) => {
                             get(&self.state);
                         }
@@ -848,12 +865,23 @@ impl<S: Send + 'static> Application<S> {
         self.dirty = false;
     }
 
+    fn apply_tracked_update(&mut self, update: TrackedStateUpdateFn<S>) {
+        let mut tracked = TrackedRef::new(&mut self.state);
+        update(&mut tracked);
+        if tracked.is_dirty() {
+            self.dirty = true;
+        }
+    }
+
     fn drain_updates(&mut self) {
         while let Ok(update) = self.rx.try_recv() {
             match update {
                 AppMessage::UpdateState(update) => {
                     update(&mut self.state);
                     self.dirty = true;
+                }
+                AppMessage::UpdateStateTracked(update) => {
+                    self.apply_tracked_update(update);
                 }
                 AppMessage::GetState(get) => {
                     get(&self.state);

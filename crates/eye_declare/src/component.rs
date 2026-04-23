@@ -173,6 +173,51 @@ impl<S> DerefMut for Tracked<S> {
     }
 }
 
+/// A mutable reference to `S` with dirty tracking.
+///
+/// Like [`Tracked<S>`] but borrows instead of owning. Reading through
+/// [`read()`](TrackedRef::read) or [`Deref`] does not set the dirty flag;
+/// writing through [`DerefMut`] does.
+pub struct TrackedRef<'a, S> {
+    inner: &'a mut S,
+    dirty: bool,
+}
+
+impl<'a, S> TrackedRef<'a, S> {
+    /// Wrap a mutable reference, starting clean.
+    pub fn new(inner: &'a mut S) -> Self {
+        Self {
+            inner,
+            dirty: false,
+        }
+    }
+
+    /// Whether any mutation has occurred through `DerefMut`.
+    pub fn is_dirty(&self) -> bool {
+        self.dirty
+    }
+
+    /// Get a shared reference without marking dirty.
+    pub fn read(&self) -> &S {
+        self.inner
+    }
+}
+
+impl<S> Deref for TrackedRef<'_, S> {
+    type Target = S;
+
+    fn deref(&self) -> &S {
+        self.inner
+    }
+}
+
+impl<S> DerefMut for TrackedRef<'_, S> {
+    fn deref_mut(&mut self) -> &mut S {
+        self.dirty = true;
+        self.inner
+    }
+}
+
 /// A component that can render itself into a terminal region.
 ///
 /// Most users should define components with the [`#[component]`](macro@crate::component)
